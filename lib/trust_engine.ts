@@ -1,15 +1,18 @@
 /**
  * EdgePay Trust Engine — Web Port
  * -----------------------------------------------------------------------
- * Mirrors the Python simulation script (compute_edge_limit.py) exactly:
- *   1. XGBoost Boosters for trust_score, max_amount, session_duration
- *   2. GRU-approximation from the real last-20-tx sequence (10 features)
- *   3. Elapsed-hours decay applied to the final limit
+ * Full on-device inference pipeline — mirrors trust_engine.ts for Android:
+ *   1. XGBoost Boosters (JS tree-walker) for trust_score, max_amount, session_duration
+ *   2. GRU inference:
+ *        Android → native TFLite via EdgePayPlugin.java (REAL model weights)
+ *        Browser → approximateGRU() JS fallback (for web testing only)
+ *   3. Balance-anchored EdgeLimit with elapsed-hours decay
  *
- * Python formula: limit = (0.6*(1-gru) + 0.4*trust) * max_amt * max(0.2, 1 - elapsed/session)
+ * Python formula: limit = (0.6*(1-gru) + 0.4*trust) * maxSafe * decay
  */
 
 import { XGBoostPredictor } from './ai/xgboost';
+import { EdgePay } from './EdgePayPlugin';
 
 let trustModel: XGBoostPredictor | null = null;
 let amountModel: XGBoostPredictor | null = null;
@@ -327,9 +330,36 @@ function approximateGRU(sequence: number[][]): number {
 
   return Math.min(0.95, Math.max(0, weightedRisk / totalWeight));
 }
+// ── 3. GRU inference dispatcher ──────────────────────────────────────────────
+//
+//  On Android (inside the Capacitor WebView):
+//    → Calls EdgePayPlugin.java which runs gru_sequence.tflite via real TFLite.
+//    → Uses REAL model weights. Zero approximation.
+//
+//  On Web (browser / `npm run dev`):
+//    → Native plugin is unavailable → falls back to approximateGRU().
+//    → The JS approximation is only for development/testing, never production.
+
+async function runGRUInference(sequence: number[][]): Promise<number> {
+  try {
+    // Flatten the 2D sequence to a 1D array for the native bridge
+    // Shape: [seqLen × nFeatures] = 200 floats, row-major
+    const flat = sequence.flat();
+    const { risk } = await EdgePay.runGRU({ sequence: flat });
+    // Validate the returned value is a sane number
+    if (typeof risk === 'number' && isFinite(risk)) {
+      console.log('[TrustEngine] GRU via native TFLite:', risk.toFixed(4));
+      return Math.max(0, Math.min(1, risk));
+    }
+    throw new Error('Invalid risk value from native plugin: ' + risk);
+  } catch (err) {
+    // Native plugin not available (web browser / iOS) — use JS approximation
+    console.warn('[TrustEngine] Native GRU unavailable, using JS approximation:', err);
+    return approximateGRU(sequence);
+  }
+}
 
 
-// ── 3. Main Inference  ────────────────────────────────────────────────────────
 
 export async function computeTrustLimit(
   txs: TxRecord[],
@@ -364,7 +394,8 @@ export async function computeTrustLimit(
   const sequence = buildGRUSequence(
     txs, bankBalance, avgAmtForGRU, bankBalance, startingBalance, seqLen
   );
-  const gruRisk = approximateGRU(sequence);
+  // Try native TFLite (Android) first; fall back to JS approximation on web
+  const gruRisk = await runGRUInference(sequence);
 
   // ── C. Cold Start Rule ───────────────────────────────────────────────────────
   const COLD_START_THRESHOLD = 10;

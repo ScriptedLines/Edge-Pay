@@ -25,6 +25,7 @@
     "@capacitor/cli": "^8.3.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/qrcode.react": "^1.0.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/web-bluetooth": "^0.0.21",

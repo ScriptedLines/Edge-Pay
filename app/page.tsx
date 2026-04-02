@@ -21,6 +21,9 @@ import InteractiveSplitCard from "@/components/ui/InteractiveSplitCard";
 import InvalidPromptCard from "@/components/ui/InvalidPromptCard";
 import { predictIntent } from "@/lib/ml";
 import { initTrustEngine, computeTrustLimit } from "@/lib/trust_engine";
+import ReceiveOfflineQR from "@/components/ui/ReceiveOfflineQR";
+import OfflineScannerSim from "@/components/ui/OfflineScannerSim";
+import { transmitP2PPayload } from "@/lib/ble/NativeP2PService";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -75,7 +78,7 @@ export default function NativePaytmClone() {
   }, []);
 
   // Sheet State Machine
-  const [sheetMode, setSheetMode] = useState<"intent" | "repay" | "quickAction" | "history" | "profile" | "notifications" | null>(null);
+  const [sheetMode, setSheetMode] = useState<"intent" | "repay" | "quickAction" | "history" | "profile" | "notifications" | "receiveQR" | "scanQR" | null>(null);
   const [showSoundbox, setShowSoundbox] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastTxMeta, setLastTxMeta] = useState<{ amount: number; target: string; tokenId: string; ts: number } | null>(null);
@@ -112,6 +115,12 @@ export default function NativePaytmClone() {
     setSheetTitle(title);
     setSheetMode("quickAction");
   };
+
+  // === App Network Config (localStorage-backed) ===
+  const [backendUrl, setBackendUrl] = useState<string>(() => {
+    if (typeof window === 'undefined') return "http://localhost:8000";
+    return localStorage.getItem('paytm_backend_url') || "http://localhost:8000";
+  });
 
   // === Ledger & Bank States (localStorage-backed) ===
   const [bankBalance, setBankBalance] = useState<number>(() => {
@@ -231,6 +240,55 @@ export default function NativePaytmClone() {
   // Sync Logic
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
+
+  // === AI Persona Sandbox Injector ===
+  const applyPersona = (type: string) => {
+    setOfflineStartTime(null);
+    setPendingOfflineTransactions([]);
+    setNegativeBalance(0);
+
+    const now = Date.now();
+    const hr = 3600000;
+    const day = 24 * hr;
+
+    let bal = 0;
+    let txs: any[] = [];
+    let startBalStr = "40000";
+
+    switch (type) {
+      case "veteran":
+        bal = 100000;
+        startBalStr = "100000";
+        for (let i = 0; i < 20; i++) txs.push({ id: `tx-${i}`, date: now - (i * 12 * hr), title: "Regular Payment", target: "Merchant", amount: 400 + Math.random() * 200, type: "debit" });
+        break;
+      case "scammer":
+        bal = 400;
+        startBalStr = "40000"; // Fake a drain from 40k to 400
+        for (let i = 0; i < 18; i++) txs.push({ id: `tx-${i}`, date: now - (i * 1.5 * hr), title: "Suspicious Payment", target: "Unknown", amount: 2000 + Math.random() * 500, type: "debit" });
+        break;
+      case "student":
+        bal = 3500;
+        startBalStr = "8000";
+        for (let i = 0; i < 15; i++) txs.push({ id: `tx-${i}`, date: now - (i * 20 * hr), title: "Snacks", target: "Canteen", amount: 150 + Math.random() * 50, type: "debit" });
+        break;
+      case "fresh":
+        bal = 10000;
+        startBalStr = "10000";
+        txs.push({ id: "tx-1", date: now - (1 * day), title: "First Payment", target: "Shop", amount: 500, type: "debit" });
+        txs.push({ id: "tx-2", date: now - (2 * day), title: "Mobile Recharge", target: "Jio", amount: 299, type: "debit" });
+        break;
+      case "merchant":
+        bal = 40000;
+        startBalStr = "40000";
+        for (let i = 0; i < 20; i++) txs.push({ id: `tx-${i}`, date: now - (i * 8 * hr), title: "Received", target: `Customer ${i}`, amount: 500 + Math.random() * 1000, type: "credit" });
+        break;
+    }
+
+    localStorage.setItem("paytm_session_start_balance", startBalStr);
+    setBankBalance(bal);
+    setTransactions(txs);
+    setSheetMode(null);
+  };
 
   // Persist ledger & offline state to localStorage on every change
   useEffect(() => { localStorage.setItem('paytm_bank_balance', String(bankBalance)); }, [bankBalance]);
@@ -656,39 +714,55 @@ export default function NativePaytmClone() {
 
               <SwipeToConfirm
                 label="Swipe to Confirm Settlement"
-                onConfirm={() => {
+                onConfirm={async () => {
                   setShowSyncModal(false);
                   setIsSyncing(true);
                   setSyncMessage("Settling Edge-Pay dues with bank...");
-                  setTimeout(() => {
-                    const isFailure = pendingOfflineTransactions.some((tx: any) =>
-                      tx.target?.toLowerCase().includes("fail")
-                    );
-                    if (isFailure) {
-                      const dues = pendingOfflineTransactions.reduce((sum: number, t: any) => sum + t.amount, 0);
-                      setNegativeBalance(dues);
-                      setSyncMessage('Bank Sync Failed! Paytm Guarantor triggered.');
-                      pushNotification(
-                        'Guarantor Intervention',
-                        `Bank sync failed. Paytm covered ₹${dues.toLocaleString('en-IN')}. Negative balance active — pay dues to unlock.`,
-                        'alert'
-                      );
-                    } else {
+
+                  try {
+                    const response = await fetch(`${backendUrl}/api/sync`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        userId: "edgepay_user_1",
+                        transactions: pendingOfflineTransactions
+                      })
+                    });
+
+                    if (!response.ok) throw new Error("Sync failed");
+
+                    const data = await response.json();
+
+                    if (data.status === "success" || data.status === "partial_success") {
+                      if (data.failedTransactions && data.failedTransactions.length > 0) {
+                        // Guarantor triggered for some
+                        const dues = pendingOfflineTransactions.filter((t: any) => data.failedTransactions.includes(t.id)).reduce((sum: number, t: any) => sum + t.amount, 0);
+                        setNegativeBalance(dues);
+                        setSyncMessage('Partial Bank Sync! Guarantor covered failed txns.');
+                        pushNotification(
+                          'Guarantor Intervention',
+                          `Bank rejected some transactions. Paytm covered ₹${dues.toLocaleString('en-IN')}. Pay dues to unlock limits.`,
+                          'alert'
+                        );
+                      } else {
+                        setSyncMessage('Settlement Complete! Bank confirmed.');
+                        setTrustPoints(prev => prev + 10);
+                        pushNotification(
+                          'Settlement Complete',
+                          `All pending Edge-Pay transactions settled (₹${data.totalAmountSettled}). +10 Trust Points!`,
+                          'shield'
+                        );
+                      }
+
                       setTransactions((prev: any[]) => prev.map((tx: any) => tx.settled === false ? { ...tx, settled: true, title: 'Edge-Pay Settled ✓' } : tx));
-                      setSyncMessage('Settlement Complete! Bank confirmed.');
-
-                      // Sync-to-Earn Behavioral Reward
-                      setTrustPoints(prev => prev + 10);
-
-                      pushNotification(
-                        'Settlement Complete',
-                        'All pending Edge-Pay transactions have been settled. +10 Trust Points Earned!',
-                        'shield'
-                      );
+                      setPendingOfflineTransactions([]);
                     }
-                    setPendingOfflineTransactions([]);
+                  } catch (e) {
+                    setSyncMessage('Network error during settlement.');
+                    pushNotification('Sync Failed', 'Could not reach bank servers. Will retry later.', 'alert');
+                  } finally {
                     setTimeout(() => setIsSyncing(false), 4000);
-                  }, 2000);
+                  }
                 }}
               />
             </motion.div>
@@ -773,19 +847,12 @@ export default function NativePaytmClone() {
           <h2 className="text-[15px] font-bold text-gray-800 dark:text-white mb-6">UPI Money Transfer</h2>
           <div className="grid grid-cols-4 gap-2">
             {[
-              { id: "scan", i: Scan, l: "Scan any\nQR", t: "Merchant Name", p: "Scan merchant QR to pay {amount} to {target}" },
-              { id: "pay", i: UserCheck, l: "Pay\nAnyone", t: "Contact Name", p: "Send money to contact {target} {amount}" },
-              { id: "bank", i: Landmark, l: "Bank\nTransfer", t: "Bank name / A/c", p: "Transfer {amount} to {target} Bank Account" },
-              { id: "history", i: History, l: "Balance &\nHistory", isHistory: true }
+              { id: "scan", i: Scan, l: "Scan any\nQR", action: () => setSheetMode("scanQR") },
+              { id: "receive", i: Smartphone, l: "Receive\nOffline", action: () => setSheetMode("receiveQR") },
+              { id: "pay", i: UserCheck, l: "Pay\nAnyone", action: () => handleQuickActionClick("pay", "Pay Anyone", "Contact Name", "Send money to contact {target} {amount}") },
+              { id: "history", i: History, l: "Balance &\nHistory", action: () => { setSheetMode("history"); setSheetTitle("Balance & History"); } }
             ].map((x) => (
-              <div key={x.l} className="flex flex-col items-center gap-2 cursor-pointer group" onClick={() => {
-                if ('isHistory' in x && x.isHistory) {
-                  setSheetMode("history");
-                  setSheetTitle("Balance & History");
-                } else {
-                  handleQuickActionClick(x.id, x.l.replace("\n", " "), (x as any).t, (x as any).p);
-                }
-              }}>
+              <div key={x.l} className="flex flex-col items-center gap-2 cursor-pointer group" onClick={x.action}>
                 <div className="w-14 h-14 bg-[#00B9F1] rounded-full flex items-center justify-center transition-transform active:scale-95 group-active:scale-95">
                   <x.i size={24} className="text-white" strokeWidth={1.5} />
                 </div>
@@ -1103,6 +1170,45 @@ export default function NativePaytmClone() {
             </div>
 
             <div className="flex flex-col gap-2.5 mt-4">
+              <h3 className="text-[12px] font-bold text-gray-400 px-1 uppercase tracking-wider flex items-center gap-1.5"><Sparkles size={14} className="text-[#00B9F1]" /> AI Settings Playground</h3>
+              <div className="bg-white dark:bg-[#1A1A1A] p-4 rounded-2xl border border-gray-100 dark:border-gray-800 transition-colors shadow-sm dark:shadow-none">
+                <p className="text-[12px] text-gray-500 mb-3 leading-snug">Generate fake transaction histories to test the EdgePay limits:</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => applyPersona('veteran')} className="py-2.5 px-2 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 font-bold text-[12px] rounded-xl active:scale-95 transition-transform border border-green-200 dark:border-green-800/50">
+                    Trusted Veteran
+                  </button>
+                  <button onClick={() => applyPersona('scammer')} className="py-2.5 px-2 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 font-bold text-[12px] rounded-xl active:scale-95 transition-transform border border-red-200 dark:border-red-800/50">
+                    Bust-out Scammer
+                  </button>
+                  <button onClick={() => applyPersona('student')} className="py-2.5 px-2 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 font-bold text-[12px] rounded-xl active:scale-95 transition-transform border border-blue-200 dark:border-blue-800/50">
+                    College Student
+                  </button>
+                  <button onClick={() => applyPersona('merchant')} className="py-2.5 px-2 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 font-bold text-[12px] rounded-xl active:scale-95 transition-transform border border-purple-200 dark:border-purple-800/50">
+                    Regular Merchant
+                  </button>
+                  <button onClick={() => applyPersona('fresh')} className="py-2.5 px-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold text-[12px] rounded-xl active:scale-95 transition-transform col-span-2 border border-gray-200 dark:border-gray-700">
+                    Fresh User (Cold Start &lt; 10 txs)
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-[#1A1A1A] p-4 rounded-2xl border border-gray-100 dark:border-gray-800 transition-colors shadow-sm dark:shadow-none mt-2">
+                <h4 className="text-[12px] font-bold text-gray-800 dark:text-white mb-2 tracking-wide uppercase">FastAPI Network Details</h4>
+                <p className="text-[11px] text-gray-500 mb-2 leading-snug">Connect physical phones by entering your computer's local WiFi IP (e.g., http://192.168.1.100:8000).</p>
+                <input 
+                  type="text"
+                  value={backendUrl}
+                  onChange={(e) => {
+                    setBackendUrl(e.target.value);
+                    localStorage.setItem('paytm_backend_url', e.target.value);
+                  }}
+                  placeholder="Backend URL (http://ip:8000)"
+                  className="w-full bg-[#F5F7F8] dark:bg-[#0A0A0A] px-3 py-2.5 rounded-xl text-[13px] font-mono border border-gray-200 dark:border-gray-800 focus:border-[#00B9F1] focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2.5 mt-4">
               <h3 className="text-[12px] font-bold text-gray-400 px-1 uppercase tracking-wider">Settings</h3>
 
               {/* Theme Toggle */}
@@ -1337,6 +1443,25 @@ export default function NativePaytmClone() {
               </div>
             </>
           )
+        )}
+
+        {sheetMode === "receiveQR" && (
+          <ReceiveOfflineQR 
+            upiId="9123456789@paytm" 
+            bleDeviceId={`EDGE-${Math.floor(Math.random() * 10000)}`} 
+            onClose={() => setSheetMode(null)} 
+          />
+        )}
+
+        {sheetMode === "scanQR" && (
+          <OfflineScannerSim 
+            onScan={(upi, ble) => {
+              setSheetMode(null);
+              // Auto-fill an offline intent
+              setTimeout(() => handleSubmit(`Pay ${upi}`), 200);
+            }} 
+            onCancel={() => setSheetMode(null)} 
+          />
         )}
       </BottomSheetContainer>
 

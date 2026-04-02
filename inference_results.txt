@@ -1,0 +1,179 @@
+
+======================================================================
+  EdgePay -- Android App Inference Simulator
+  Feature engineering mirrors trust_engine.ts exactly.
+======================================================================
+
+Loading XGBoost models...
+OK: 3 XGBoost models loaded.
+OK: TFLite GRU will be loaded per inference call.
+
+======================================================================
+  ACCOUNT : Rohan S. (Veteran Professional)
+  Balance : Rs. 87,400.00  (started Rs.120,000)
+  Txs     : 320 total  |  4 in last 7 days
+----------------------------------------------------------------------
+  [Computed Features]
+    avg_amount          = Rs.  3,199.11
+    max_amount          = Rs.  5,135.24
+    balance_drain_ratio =     0.272  (27.2% drained)
+    cash_out_ratio      =     0.875
+    freq_spike_ratio    =     1.069
+    late_night_ratio    =     0.272
+    repeat_recv_ratio   =     1.000
+    times_near_limit    =       219
+    times_balance_zero  =         0
+    device_consistency  =     0.950
+----------------------------------------------------------------------
+  [Model Predictions]
+    XGBoost Trust Score    = 0.7542 / 1.0  -> 75.4 / 100
+    TFLite GRU Risk Score  = 0.0725 / 1.0  (LOW RISK)
+    XGBoost Raw Amount     = Rs.   12,143.40  (raw regression, not used for limit)
+    XGBoost Session Hours  = 5.30 h
+----------------------------------------------------------------------
+  [Balance-Anchored Limit Formula]
+    allowanceRate   = 0.15 + 0.754 * 0.35 = 0.414
+    maxSafeAmount   = Rs.87,400 * 0.414 = Rs.36,180.01
+    combinedTrust   = 0.6*(1-0.072) + 0.4*0.754 = 0.858
+  -- Offline limit at elapsed hours (decay = max(0.2, 1 - t/6)) --
+    [OK  ]  T+ 0h  (decay=1.00)  -->  Rs.10,000.00
+    [OK  ]  T+ 1h  (decay=0.83)  -->  Rs.10,000.00
+    [OK  ]  T+ 2h  (decay=0.67)  -->  Rs.10,000.00
+    [OK  ]  T+ 4h  (decay=0.33)  -->  Rs.10,000.00
+    [OK  ]  T+ 6h  (decay=0.20)  -->  Rs. 6,209.82
+    [OK  ]  T+12h  (decay=0.20)  -->  Rs. 6,209.82
+    [OK  ]  T+24h  (decay=0.20)  -->  Rs. 6,209.82
+
+======================================================================
+  ACCOUNT : Unknown (Bust-Out Scammer)
+  Balance : Rs.  1,200.00  (started Rs.40,000)
+  Txs     : 48 total  |  18 in last 7 days
+----------------------------------------------------------------------
+  [Computed Features]
+    avg_amount          = Rs.  2,837.51
+    max_amount          = Rs.  9,455.01
+    balance_drain_ratio =     0.970  (97.0% drained)
+    cash_out_ratio      =     1.000
+    freq_spike_ratio    =     2.262
+    late_night_ratio    =     0.146
+    repeat_recv_ratio   =     0.182
+    times_near_limit    =        18
+    times_balance_zero  =         1
+    device_consistency  =     0.879
+----------------------------------------------------------------------
+  [Model Predictions]
+    XGBoost Trust Score    = 0.4609 / 1.0  -> 46.1 / 100
+    TFLite GRU Risk Score  = 0.0045 / 1.0  (LOW RISK)
+    XGBoost Raw Amount     = Rs.    5,393.23  (raw regression, not used for limit)
+    XGBoost Session Hours  = 4.68 h
+----------------------------------------------------------------------
+  [Balance-Anchored Limit Formula]
+    allowanceRate   = 0.15 + 0.461 * 0.35 = 0.311
+    maxSafeAmount   = Rs.1,200 * 0.311 = Rs.373.58
+    combinedTrust   = 0.6*(1-0.004) + 0.4*0.461 = 0.782
+  -- Offline limit at elapsed hours (decay = max(0.2, 1 - t/6)) --
+    [LOW ]  T+ 0h  (decay=1.00)  -->  Rs.   292.02
+    [LOW ]  T+ 1h  (decay=0.83)  -->  Rs.   243.35
+    [LOW ]  T+ 2h  (decay=0.67)  -->  Rs.   194.68
+    [LOW ]  T+ 4h  (decay=0.33)  -->  Rs.    97.34
+    [LOW ]  T+ 6h  (decay=0.20)  -->  Rs.    58.40
+    [LOW ]  T+12h  (decay=0.20)  -->  Rs.    58.40
+    [LOW ]  T+24h  (decay=0.20)  -->  Rs.    58.40
+
+======================================================================
+  ACCOUNT : Priya K. (College Student)
+  Balance : Rs.  9,800.00  (started Rs.25,000)
+  Txs     : 87 total  |  4 in last 7 days
+----------------------------------------------------------------------
+  [Computed Features]
+    avg_amount          = Rs.    726.83
+    max_amount          = Rs.  7,730.83
+    balance_drain_ratio =     0.608  (60.8% drained)
+    cash_out_ratio      =     0.862
+    freq_spike_ratio    =     1.568
+    late_night_ratio    =     0.276
+    repeat_recv_ratio   =     1.000
+    times_near_limit    =        17
+    times_balance_zero  =         0
+    device_consistency  =     0.937
+----------------------------------------------------------------------
+  [Model Predictions]
+    XGBoost Trust Score    = 0.4868 / 1.0  -> 48.7 / 100
+    TFLite GRU Risk Score  = 0.1494 / 1.0  (LOW RISK)
+    XGBoost Raw Amount     = Rs.    7,593.47  (raw regression, not used for limit)
+    XGBoost Session Hours  = 5.48 h
+----------------------------------------------------------------------
+  [Balance-Anchored Limit Formula]
+    allowanceRate   = 0.15 + 0.487 * 0.35 = 0.320
+    maxSafeAmount   = Rs.9,800 * 0.320 = Rs.3,139.71
+    combinedTrust   = 0.6*(1-0.149) + 0.4*0.487 = 0.705
+  -- Offline limit at elapsed hours (decay = max(0.2, 1 - t/6)) --
+    [WARN]  T+ 0h  (decay=1.00)  -->  Rs. 2,213.71
+    [WARN]  T+ 1h  (decay=0.83)  -->  Rs. 1,844.76
+    [WARN]  T+ 2h  (decay=0.67)  -->  Rs. 1,475.80
+    [LOW ]  T+ 4h  (decay=0.33)  -->  Rs.   737.90
+    [LOW ]  T+ 6h  (decay=0.20)  -->  Rs.   442.74
+    [LOW ]  T+12h  (decay=0.20)  -->  Rs.   442.74
+    [LOW ]  T+24h  (decay=0.20)  -->  Rs.   442.74
+
+======================================================================
+  ACCOUNT : New_User_7842 (Fresh / Cold Start)
+  Balance : Rs.  6,250.00  (started Rs.7,000)
+  Txs     : 7 total  |  7 in last 7 days
+----------------------------------------------------------------------
+  [Computed Features]
+    avg_amount          = Rs.    156.18
+    max_amount          = Rs.    272.50
+    balance_drain_ratio =     0.107  (10.7% drained)
+    cash_out_ratio      =     0.714
+    freq_spike_ratio    =     0.714
+    late_night_ratio    =     0.571
+    repeat_recv_ratio   =     0.400
+    times_near_limit    =         2
+    times_balance_zero  =         0
+    device_consistency  =     0.703
+----------------------------------------------------------------------
+  [Model Predictions]
+    XGBoost Trust Score    = 0.8566 / 1.0  -> 85.7 / 100
+    TFLite GRU Risk Score  = 0.0003 / 1.0  (LOW RISK)
+    XGBoost Raw Amount     = Rs.    1,385.72  (raw regression, not used for limit)
+    XGBoost Session Hours  = 19.05 h
+----------------------------------------------------------------------
+  [LOCKED] COLD START -- < 10 txs (7). Offline capability disabled.
+
+======================================================================
+  ACCOUNT : Deepak M. (Regular Merchant)
+  Balance : Rs. 71,000.00  (started Rs.95,000)
+  Txs     : 152 total  |  2 in last 7 days
+----------------------------------------------------------------------
+  [Computed Features]
+    avg_amount          = Rs.  1,793.44
+    max_amount          = Rs.  2,794.63
+    balance_drain_ratio =     0.253  (25.3% drained)
+    cash_out_ratio      =     0.855
+    freq_spike_ratio    =     0.676
+    late_night_ratio    =     0.263
+    repeat_recv_ratio   =     1.000
+    times_near_limit    =       104
+    times_balance_zero  =         0
+    device_consistency  =     0.950
+----------------------------------------------------------------------
+  [Model Predictions]
+    XGBoost Trust Score    = 0.7822 / 1.0  -> 78.2 / 100
+    TFLite GRU Risk Score  = 0.3430 / 1.0  (LOW RISK)
+    XGBoost Raw Amount     = Rs.   22,336.46  (raw regression, not used for limit)
+    XGBoost Session Hours  = 5.06 h
+----------------------------------------------------------------------
+  [Balance-Anchored Limit Formula]
+    allowanceRate   = 0.15 + 0.782 * 0.35 = 0.424
+    maxSafeAmount   = Rs.71,000 * 0.424 = Rs.30,086.77
+    combinedTrust   = 0.6*(1-0.343) + 0.4*0.782 = 0.707
+  -- Offline limit at elapsed hours (decay = max(0.2, 1 - t/6)) --
+    [OK  ]  T+ 0h  (decay=1.00)  -->  Rs.10,000.00
+    [OK  ]  T+ 1h  (decay=0.83)  -->  Rs.10,000.00
+    [OK  ]  T+ 2h  (decay=0.67)  -->  Rs.10,000.00
+    [OK  ]  T+ 4h  (decay=0.33)  -->  Rs. 7,091.33
+    [WARN]  T+ 6h  (decay=0.20)  -->  Rs. 4,254.80
+    [WARN]  T+12h  (decay=0.20)  -->  Rs. 4,254.80
+    [WARN]  T+24h  (decay=0.20)  -->  Rs. 4,254.80
+

@@ -1,0 +1,79 @@
+ACCOUNT: Rohan S. (Veteran Professional)
+TRUST:    0.7542 / 1.0
+GRU_RISK: 0.0725 / 1.0
+DRAIN:    0.272
+LATE_NGT: 0.272
+FREQ_SPIKE: 1.069
+REPEAT_RX:  1.000
+ALLOWANCE:  0.15 + 0.754 * 0.35 = 0.414
+COMBINED:   0.6*(1-0.072) + 0.4*0.754 = 0.858
+  [OK  ]  T+ 0h  (decay=1.00)  -->  Rs.10,000.00
+  [OK  ]  T+ 1h  (decay=0.83)  -->  Rs.10,000.00
+  [OK  ]  T+ 2h  (decay=0.67)  -->  Rs.10,000.00
+  [OK  ]  T+ 4h  (decay=0.33)  -->  Rs.10,000.00
+  [OK  ]  T+ 6h  (decay=0.20)  -->  Rs. 6,209.82
+  [OK  ]  T+12h  (decay=0.20)  -->  Rs. 6,209.82
+  [OK  ]  T+24h  (decay=0.20)  -->  Rs. 6,209.82
+
+ACCOUNT: Unknown (Bust-Out Scammer)
+TRUST:    0.4609 / 1.0
+GRU_RISK: 0.0045 / 1.0
+DRAIN:    0.970
+LATE_NGT: 0.146
+FREQ_SPIKE: 2.262
+REPEAT_RX:  0.182
+ALLOWANCE:  0.15 + 0.461 * 0.35 = 0.311
+COMBINED:   0.6*(1-0.004) + 0.4*0.461 = 0.782
+  [LOW ]  T+ 0h  (decay=1.00)  -->  Rs.   292.02
+  [LOW ]  T+ 1h  (decay=0.83)  -->  Rs.   243.35
+  [LOW ]  T+ 2h  (decay=0.67)  -->  Rs.   194.68
+  [LOW ]  T+ 4h  (decay=0.33)  -->  Rs.    97.34
+  [LOW ]  T+ 6h  (decay=0.20)  -->  Rs.    58.40
+  [LOW ]  T+12h  (decay=0.20)  -->  Rs.    58.40
+  [LOW ]  T+24h  (decay=0.20)  -->  Rs.    58.40
+
+ACCOUNT: Priya K. (College Student)
+TRUST:    0.4868 / 1.0
+GRU_RISK: 0.1494 / 1.0
+DRAIN:    0.608
+LATE_NGT: 0.276
+FREQ_SPIKE: 1.568
+REPEAT_RX:  1.000
+ALLOWANCE:  0.15 + 0.487 * 0.35 = 0.320
+COMBINED:   0.6*(1-0.149) + 0.4*0.487 = 0.705
+  [WARN]  T+ 0h  (decay=1.00)  -->  Rs. 2,213.71
+  [WARN]  T+ 1h  (decay=0.83)  -->  Rs. 1,844.76
+  [WARN]  T+ 2h  (decay=0.67)  -->  Rs. 1,475.80
+  [LOW ]  T+ 4h  (decay=0.33)  -->  Rs.   737.90
+  [LOW ]  T+ 6h  (decay=0.20)  -->  Rs.   442.74
+  [LOW ]  T+12h  (decay=0.20)  -->  Rs.   442.74
+  [LOW ]  T+24h  (decay=0.20)  -->  Rs.   442.74
+
+ACCOUNT: New_User_7842 (Fresh / Cold Start)
+TRUST:    0.8566 / 1.0
+GRU_RISK: 0.0003 / 1.0
+DRAIN:    0.107
+LATE_NGT: 0.571
+FREQ_SPIKE: 0.714
+REPEAT_RX:  0.400
+ALLOWANCE:  N/A
+COMBINED:   N/A
+LIMITS:  COLD START -- offline LOCKED (tx_count < 10)
+
+ACCOUNT: Deepak M. (Regular Merchant)
+TRUST:    0.7822 / 1.0
+GRU_RISK: 0.3430 / 1.0
+DRAIN:    0.253
+LATE_NGT: 0.263
+FREQ_SPIKE: 0.676
+REPEAT_RX:  1.000
+ALLOWANCE:  0.15 + 0.782 * 0.35 = 0.424
+COMBINED:   0.6*(1-0.343) + 0.4*0.782 = 0.707
+  [OK  ]  T+ 0h  (decay=1.00)  -->  Rs.10,000.00
+  [OK  ]  T+ 1h  (decay=0.83)  -->  Rs.10,000.00
+  [OK  ]  T+ 2h  (decay=0.67)  -->  Rs.10,000.00
+  [OK  ]  T+ 4h  (decay=0.33)  -->  Rs. 7,091.33
+  [WARN]  T+ 6h  (decay=0.20)  -->  Rs. 4,254.80
+  [WARN]  T+12h  (decay=0.20)  -->  Rs. 4,254.80
+  [WARN]  T+24h  (decay=0.20)  -->  Rs. 4,254.80
+
