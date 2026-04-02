@@ -18,9 +18,6 @@ import BleSoundboxSim from "@/components/ui/BleSoundboxSim";
 import ReceiverReceiptSlip from "@/components/ui/ReceiverReceiptSlip";
 import PaytmSuccessScreen from "@/components/ui/PaytmSuccessScreen";
 import InteractiveSplitCard from "@/components/ui/InteractiveSplitCard";
-import InvalidPromptCard from "@/components/ui/InvalidPromptCard";
-import { predictIntent } from "@/lib/ml";
-import { initTrustEngine, computeTrustLimit } from "@/lib/trust_engine";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -32,15 +29,10 @@ interface ParsedAction {
   amount: number;
   icon: string;
   upiId?: string;
-  targetCount?: number; // for split: total people including user
 }
 
 interface ParseResponse {
-  category?: "financial" | "navigate" | "action" | "invalid";
   actions: ParsedAction[];
-  ui_target?: string;
-  command?: string;
-  error_message?: string;
 }
 
 const ICON_MAP: Record<string, "users" | "wifi" | "zap" | "cart" | "card" | "smartphone"> = {
@@ -70,7 +62,6 @@ export default function NativePaytmClone() {
     if (typeof window !== 'undefined' && !localStorage.getItem('forced_40k_reset')) {
       setBankBalance(40000);
       localStorage.setItem('forced_40k_reset', 'true');
-      localStorage.setItem('paytm_session_start_balance', '40000');
     }
   }, []);
 
@@ -87,11 +78,7 @@ export default function NativePaytmClone() {
 
   // Interactive Split flow
   const [showSplitCard, setShowSplitCard] = useState(false);
-  const [splitMeta, setSplitMeta] = useState<{ title: string; totalAmount: number; targetCount?: number } | null>(null);
-
-  // Invalid prompt overlay
-  const [showInvalidCard, setShowInvalidCard] = useState(false);
-  const [invalidMeta, setInvalidMeta] = useState<{ message: string; prompt: string } | null>(null);
+  const [splitMeta, setSplitMeta] = useState<{ title: string; totalAmount: number } | null>(null);
 
   // Modal Inputs
   const [repayMode, setRepayMode] = useState<"full" | "custom">("full");
@@ -155,7 +142,6 @@ export default function NativePaytmClone() {
 
   // === Edge-Pay Offline / Simulator States ===
   const [isOnline, setIsOnline] = useState(true);
-  const [offlineStartTime, setOfflineStartTime] = useState<number | null>(null);
   const [pendingOfflineTransactions, setPendingOfflineTransactions] = useState<any[]>(() => {
     if (typeof window === 'undefined') return [];
     try { return JSON.parse(localStorage.getItem('paytm_pending_offline') || '[]'); } catch { return []; }
@@ -167,58 +153,37 @@ export default function NativePaytmClone() {
   });
   const isAccountBlocked = negativeBalance > 0;
 
-  // === Dynamic AI Edge-Score Engine ===
-  const [edgeScore, setEdgeScore] = useState<number>(50);
-  const [offlineLimit, setOfflineLimit] = useState<number>(0);
-  const [aiMaxAmount, setAiMaxAmount] = useState<number>(0);
-  const [balanceDrain, setBalanceDrain] = useState<number>(0);
-  const [gruRiskDisplay, setGruRiskDisplay] = useState<number>(0);
-  const [isColdStart, setIsColdStart] = useState<boolean>(false);
+  // Dynamic Edge-Pay Trust Engine (Mocked 20% ML Model)
+  const offlineLimit = isAccountBlocked ? 0 : Math.floor(bankBalance * 0.2);
+
+  // === Dynamic Edge-Score Engine ===
   const [trustPoints, setTrustPoints] = useState<number>(() => {
     if (typeof window === 'undefined') return 0;
     return Number(localStorage.getItem('paytm_trust_points') || '0');
   });
-  // Track the session starting balance (highest balance seen = the starting point)
-  const [startingBalance] = useState<number>(() => {
-    if (typeof window === 'undefined') return 40000;
-    return Number(localStorage.getItem('paytm_session_start_balance') || '40000');
-  });
 
-  const runTrustEngine = (elapsedHours: number = 0) => {
-    initTrustEngine().then(() => {
-      computeTrustLimit(transactions, bankBalance, startingBalance, elapsedHours).then((res) => {
-        setEdgeScore(res.trustScore);
-        setAiMaxAmount(res.maxAmount);
-        setBalanceDrain(res.balanceDrainPct);
-        setGruRiskDisplay(Math.round(res.gruRisk * 100));
-        setIsColdStart(!!res.isColdStart);
-        if (negativeBalance > 0 || res.isColdStart) {
-          setOfflineLimit(0);
-        } else {
-          setOfflineLimit(res.edgeLimit);
-        }
-      });
-    });
-  };
+  const edgeScore = (() => {
+    let score = 0;
+    // Bank Balance Weight (Max 40)
+    if (bankBalance > 10000) score += 40;
+    else if (bankBalance > 5000) score += 25;
+    else if (bankBalance > 0) score += 10;
 
-  // Re-run inference whenever balance/txns change
-  useEffect(() => {
-    const elapsed = offlineStartTime
-      ? (Date.now() - offlineStartTime) / 3600000
-      : 0;
-    runTrustEngine(elapsed);
-  }, [transactions, bankBalance, negativeBalance, startingBalance, offlineStartTime]);
+    // Repayment & Frequency Weight (Max 30)
+    const repayCount = transactions.filter((t: any) => t.type === 'repay').length;
+    score += Math.min(20, repayCount * 5);
 
-  // While offline: re-run every 60 seconds to apply time-based decay
-  useEffect(() => {
-    if (isOnline || !offlineStartTime) return;
-    const interval = setInterval(() => {
-      const elapsed = (Date.now() - offlineStartTime) / 3600000;
-      runTrustEngine(elapsed);
-    }, 60_000);
-    return () => clearInterval(interval);
-  }, [isOnline, offlineStartTime, transactions, bankBalance]);
+    const txVolume = transactions.reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+    if (txVolume > 5000) score += 10;
 
+    // Behavioral Layer: Sync-to-Earn Points (Max 30)
+    score += Math.min(30, Math.floor(trustPoints / 10));
+
+    // Penalties
+    if (negativeBalance > 0) score -= 50;
+
+    return Math.max(0, Math.min(100, score));
+  })();
 
   const trustTier = edgeScore >= 80 ? "High" : edgeScore >= 50 ? "Moderate" : edgeScore >= 20 ? "Low" : "Blocked";
   const trustColor = edgeScore >= 80 ? "#22c55e" : edgeScore >= 50 ? "#f59e0b" : edgeScore >= 20 ? "#f97316" : "#ef4444";
@@ -248,7 +213,7 @@ export default function NativePaytmClone() {
 
   // Edge-Pay Limit Accounting
   const pendingDues = pendingOfflineTransactions.reduce((sum, t) => sum + t.amount, 0);
-  const availableLimit = Math.max(0, offlineLimit - pendingDues);
+  const availableLimit = offlineLimit - pendingDues;
 
   const total = actionPlan?.actions
     ? actionPlan.actions.reduce((sum, a) => sum + a.amount, 0)
@@ -330,100 +295,74 @@ export default function NativePaytmClone() {
     setPaymentStatus("idle");
     setShowSoundbox(false);
 
-    try {
-      // ── LOCAL ON-DEVICE ML EXECUTION (Zero External API) ────────────────
-      const result = await predictIntent(trimmed);
-
-      if (!result) {
-        throw new Error("Local ML Engine failed to categorize the request.");
-      }
-
-      const { intentId, category, params, text } = result;
-      let data: ParseResponse = { category: category as any, actions: [] };
-
-      // Map ML intent to schema
-      if (category === "financial") {
-        data.actions = [{
-          id: `tx-${Date.now()}`,
-          type: intentId as any,
-          title: intentId === "split" ? "Bill Split" : "Payment Routing",
-          target: "Merchant",
-          amount: params?.amount || 0,
-          targetCount: params?.targetCount,
-          icon: intentId === "split" ? "users" : "wifi"
-        }];
-
-        if (!data.actions[0].amount) {
-          data.category = "invalid";
-          data.error_message = `I understand you want to ${intentId}, but I couldn't find an exact amount. Please include a number.`;
-        }
-      } else if (category === "navigate") {
-        data.ui_target = intentId === "history" ? "history_sheet" : "profile_sheet";
-      } else if (category === "action") {
-        data.command = intentId === "theme" ? "toggle_theme" : "";
-      } else {
-        data.error_message = `I'm an offline Edge AI. I can't "${text}". Try "Pay 500" or "Split bill between 3".`;
-      }
-
-      // ── UNIVERSAL ROUTER ────────────────────────────────────────────────
-      const cat = data.category;
-
-      if (cat === "navigate" && data.ui_target) {
-        const mode = data.ui_target === "history_sheet" ? "history" : "profile";
-        setSheetMode(mode as any);
-        setSheetTitle(data.ui_target === "history_sheet" ? "Balance & History" : "My Profile");
-        setIsProcessing(false);
-        setInputValue("");
-        return;
-      }
-
-      if (cat === "action" && data.command) {
-        if (data.command === "toggle_theme") {
-          setTheme(theme === "dark" ? "light" : "dark");
-        }
-        setIsProcessing(false);
-        setInputValue("");
-        return;
-      }
-
-      if (cat === "invalid") {
-        setInvalidMeta({ message: data.error_message || "", prompt: trimmed });
-        setShowInvalidCard(true);
-        setIsProcessing(false);
-        setInputValue("");
-        return;
-      }
-
-      // Financial Limits and Augmentation
-      const totalRequested = data.actions.reduce((sum, a) => sum + a.amount, 0);
-      if (totalRequested > availableLimit) {
-        setInvalidMeta({
-          message: `Trust Limit Exceeded! Requested ₹${totalRequested} but your available limit is ₹${availableLimit}.`,
-          prompt: trimmed
+    if (isOnline) {
+      try {
+        const res = await fetch("http://192.168.1.67:8000/api/parse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ intent: trimmed }),
         });
-        setShowInvalidCard(true);
+
+        if (!res.ok) {
+          console.warn("API error or quota exceeded, falling back to local intent parser...");
+          const localData = localFallbackParse(trimmed);
+          if (localData && localData.actions.length > 0) {
+            setActionPlan(localData);
+            setSheetMode("intent");
+          } else {
+            alert("Edge-AI couldn't extract an exact amount from your request.");
+          }
+          setIsProcessing(false);
+          return;
+        }
+
+        const data: ParseResponse = await res.json();
+
+        // Augment API data with local fallback for typed name and UPI ID
+        const fallback = localFallbackParse(trimmed);
+        if (data.actions && data.actions.length > 0 && fallback && fallback.actions.length > 0) {
+          const mainAction = data.actions[0];
+          const localAction = fallback.actions[0];
+
+          if (!mainAction.upiId) mainAction.upiId = localAction.upiId;
+
+          // More inclusive override: if API returns a generic descriptor, use the specific typed name
+          const genericLabels = ["merchant", "payee", "merchant qr", "scan merchant qr", "scan merchant qr to pay", "pay anyone"];
+          const currentTarget = mainAction.target.toLowerCase();
+          const isGeneric = genericLabels.some(label => currentTarget === label || currentTarget.includes(label));
+
+          if (isGeneric || mainAction.target === "Merchant" || mainAction.target === "Payee") {
+            mainAction.target = localAction.target;
+          }
+        }
+
+        setActionPlan(data);
+        setSheetMode("intent");
+      } catch (err) {
+        console.error("Parse failed:", err);
+      } finally {
+        setIsProcessing(false);
+      }
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 800)); // Simulate Edge AI latency
+
+      const localData = localFallbackParse(trimmed);
+      if (!localData || localData.actions.length === 0) {
+        alert("Edge-AI couldn't extract an exact amount from your request.");
         setIsProcessing(false);
         return;
       }
 
-      // Use basic local regex mapping for specific target names
-      const fallback = localFallbackParse(trimmed);
-      if (data.actions && data.actions.length > 0 && fallback && fallback.actions.length > 0) {
-        const mainAction = data.actions[0];
-        const localAction = fallback.actions[0];
-        if (!mainAction.upiId) mainAction.upiId = localAction.upiId;
-        if (mainAction.target === "Merchant" && localAction.target !== "Merchant") {
-          mainAction.target = localAction.target;
-        }
+      const totalRequested = localData.actions.reduce((sum, a) => sum + a.amount, 0);
+
+      if (totalRequested > availableLimit) {
+        alert(`Edge-Pay Trust Limit Exceeded! \nRequested: ₹${totalRequested}\nAvailable Limit: ₹${availableLimit}`);
+        setIsProcessing(false);
+        return;
       }
 
-      setActionPlan(data);
+      setActionPlan(localData);
       setSheetMode("intent");
-    } catch (err: any) {
-      console.error("Local ML Engine error:", err);
-      setInvalidMeta({ message: err.message || "The Edge-AI model is still loading. Please try again in a few seconds.", prompt: trimmed });
-      setShowInvalidCard(true);
-    } finally {
       setIsProcessing(false);
     }
   };
@@ -434,11 +373,7 @@ export default function NativePaytmClone() {
     // Intercept split action — launch interactive split card instead of paying
     if (actionPlan && actionPlan.actions.length > 0 && actionPlan.actions[0].type === "split") {
       const splitAction = actionPlan.actions[0];
-      setSplitMeta({
-        title: splitAction.title || splitAction.target,
-        totalAmount: splitAction.amount,
-        targetCount: splitAction.targetCount
-      });
+      setSplitMeta({ title: splitAction.title || splitAction.target, totalAmount: splitAction.amount });
       setSheetMode(null);
       setShowSplitCard(true);
       return;
@@ -454,10 +389,16 @@ export default function NativePaytmClone() {
         const newTxs = actionPlan.actions.map(a => ({ id: `tx-${Date.now()}-${Math.random()}`, date: Date.now(), title: "Edge-Pay Offline", target: a.target, amount: a.amount, type: "debit", settled: false }));
         setTransactions(prev => [...newTxs, ...prev]);
 
-        // Generate preliminary token — BLE component will update with the real HMAC-signed tokenId
+        // Generate Encrypted Payment Bundle (Nonce + Timestamp + Mock Signature)
         const token = `EP-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 10000)}`;
         const ts = Date.now();
+        const mockSignature = `0x${Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`;
+
         setLastTxMeta({ amount: totalDed, target: actionPlan.actions[0]?.target || 'Merchant', tokenId: token, ts });
+
+        // Pass signature data explicitly if we want later, for now simulate UI
+        // @ts-ignore - Mock attaching signature to window for ReceiverSlip to read
+        window.__lastSignature = mockSignature;
         setShowSoundbox(true);
         setPaymentStatus('success');
         try { Haptics.impact({ style: ImpactStyle.Medium }); } catch (e) { }
@@ -552,7 +493,6 @@ export default function NativePaytmClone() {
               <InteractiveSplitCard
                 title={splitMeta.title}
                 totalAmount={splitMeta.totalAmount}
-                targetCount={splitMeta.targetCount}
                 onClose={() => {
                   setShowSplitCard(false);
                   setSplitMeta(null);
@@ -714,16 +654,7 @@ export default function NativePaytmClone() {
             <Bell size={22} className="opacity-90 dark:opacity-90" />
             {unreadCount > 0 && <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border border-white dark:border-[#0A0A0A] flex items-center justify-center"><span className="text-[9px] font-bold text-white">{unreadCount > 9 ? '9+' : unreadCount}</span></div>}
           </button>
-          <NetworkToggle isOnline={isOnline} onToggle={(state) => {
-            setIsOnline(state);
-            if (!state) {
-              // Going offline: record the exact moment
-              setOfflineStartTime(Date.now());
-            } else {
-              // Coming back online: reset elapsed timer
-              setOfflineStartTime(null);
-            }
-          }} />
+          <NetworkToggle isOnline={isOnline} onToggle={setIsOnline} />
         </div>
       </header>
 
@@ -814,17 +745,7 @@ export default function NativePaytmClone() {
                 {pendingDues > 0 && !isAccountBlocked && (
                   <button onClick={() => setSheetMode("repay")} className="text-[10px] bg-red-500/20 text-red-500 px-2 py-0.5 rounded font-bold">Clear Dues</button>
                 )}
-                <TrustScoreBadge
-                  isBlocked={isAccountBlocked}
-                  edgeScore={edgeScore}
-                  edgeLimit={availableLimit}
-                  balanceDrain={balanceDrain}
-                  trustTier={trustTier}
-                  trustColor={trustColor}
-                  gruRisk={gruRiskDisplay}
-                  elapsedHours={offlineStartTime ? (Date.now() - offlineStartTime) / 3600000 : 0}
-                  isColdStart={isColdStart}
-                />
+                <TrustScoreBadge isBlocked={isAccountBlocked} />
               </div>
             )}
           </div>
@@ -1066,17 +987,7 @@ export default function NativePaytmClone() {
               </div>
               <h2 className="text-[20px] font-bold text-gray-900 dark:text-white mb-0.5">Avinash Kumar</h2>
               <p className="text-[14px] text-gray-500 dark:text-gray-400 mb-2">9123456789@paytm</p>
-              <TrustScoreBadge
-                isBlocked={isAccountBlocked}
-                edgeScore={edgeScore}
-                edgeLimit={availableLimit}
-                balanceDrain={balanceDrain}
-                trustTier={trustTier}
-                trustColor={trustColor}
-                gruRisk={gruRiskDisplay}
-                elapsedHours={offlineStartTime ? (Date.now() - offlineStartTime) / 3600000 : 0}
-                isColdStart={isColdStart}
-              />
+              <TrustScoreBadge isBlocked={isAccountBlocked} />
             </div>
 
             <div className="flex flex-col gap-2.5 mt-2">
@@ -1267,18 +1178,7 @@ export default function NativePaytmClone() {
             </div>
           ) : showSoundbox ? (
             <div className="pb-2">
-              <BleSoundboxSim
-                amount={total}
-                target={actionPlan?.actions[0]?.target || "Merchant"}
-                merchantId={actionPlan?.actions[0]?.upiId || actionPlan?.actions[0]?.target || "merchant"}
-                onComplete={(success, tokenId) => {
-                  if (tokenId) {
-                    setLastTxMeta(prev => prev ? { ...prev, tokenId } : prev);
-                  }
-                  setShowSoundbox(false);
-                  setShowReceipt(true);
-                }}
-              />
+              <BleSoundboxSim amount={total} target={actionPlan?.actions[0]?.target || "Merchant"} />
             </div>
           ) : showReceipt && lastTxMeta ? (
             <div className="pb-4">
@@ -1311,8 +1211,6 @@ export default function NativePaytmClone() {
                     amount={`₹${action.amount.toLocaleString("en-IN")}`}
                     iconName={ICON_MAP[action.icon] ?? "card"}
                     index={i}
-                    isEdgePay={!isOnline}
-                    availableLimit={availableLimit}
                   />
                 ))}
               </div>
@@ -1340,66 +1238,6 @@ export default function NativePaytmClone() {
         )}
       </BottomSheetContainer>
 
-      {/* ── Modal Overlays ────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showSplitCard && splitMeta && (
-          <InteractiveSplitCard
-            title={splitMeta.title}
-            totalAmount={splitMeta.totalAmount}
-            targetCount={splitMeta.targetCount}
-            onClose={() => {
-              setShowSplitCard(false);
-              setSplitMeta(null);
-              setInputValue("");
-            }}
-            onConfirm={(contacts, perPerson) => {
-              const totalAmt = splitMeta.totalAmount;
-              setBankBalance(prev => prev - totalAmt);
-              setTransactions(prev => [
-                {
-                  id: `split-${Date.now()}`,
-                  date: Date.now(),
-                  title: `Split: ${splitMeta.title}`,
-                  target: `${contacts.length} Friends`,
-                  amount: totalAmt,
-                  type: 'debit'
-                },
-                ...prev
-              ]);
-              pushNotification(
-                'Split Requests Sent',
-                `Requested ₹${perPerson} from ${contacts.length} people.`,
-                'zap'
-              );
-            }}
-          />
-        )}
-
-        {showSuccessScreen && successMeta && (
-          <PaytmSuccessScreen
-            amount={successMeta.amount}
-            target={successMeta.target}
-            upiId={successMeta.upiId}
-            onClose={() => {
-              setShowSuccessScreen(false);
-              setSuccessMeta(null);
-              setInputValue("");
-            }}
-          />
-        )}
-
-        {showInvalidCard && invalidMeta && (
-          <InvalidPromptCard
-            errorMessage={invalidMeta.message}
-            originalPrompt={invalidMeta.prompt}
-            onClose={() => {
-              setShowInvalidCard(false);
-              setInvalidMeta(null);
-              setInputValue("");
-            }}
-          />
-        )}
-      </AnimatePresence>
     </main>
   );
 }

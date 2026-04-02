@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Edge-Pay Virtual Soundbox</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0a;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .logo {
+      font-size: 13px;
+      font-weight: 800;
+      color: #00B9F1;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 40px;
+    }
+
+    .soundbox-card {
+      width: 100%;
+      max-width: 380px;
+      background: #111;
+      border: 1.5px solid #222;
+      border-radius: 28px;
+      padding: 32px 28px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+    }
+
+    .icon-ring {
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      border: 2.5px solid #00B9F1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 24px;
+      position: relative;
+    }
+    .icon-ring svg { color: #00B9F1; }
+
+    .pulse-ring {
+      position: absolute;
+      inset: -12px;
+      border-radius: 50%;
+      border: 2px solid rgba(0, 185, 241, 0.3);
+      animation: pulse-out 2s ease-out infinite;
+    }
+    .pulse-ring-2 {
+      position: absolute;
+      inset: -24px;
+      border-radius: 50%;
+      border: 1px solid rgba(0, 185, 241, 0.15);
+      animation: pulse-out 2s ease-out infinite 0.6s;
+    }
+    @keyframes pulse-out {
+      0%   { transform: scale(0.95); opacity: 1; }
+      100% { transform: scale(1.0); opacity: 0; }
+    }
+
+    .status-label {
+      font-size: 22px;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .status-sub {
+      font-size: 13px;
+      color: #555;
+      text-align: center;
+      max-width: 260px;
+      line-height: 1.5;
+      margin-bottom: 28px;
+    }
+
+    .start-btn {
+      width: 100%;
+      padding: 16px;
+      border-radius: 16px;
+      border: none;
+      background: #00B9F1;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    .start-btn:active { transform: scale(0.98); }
+    .start-btn:disabled { opacity: 0.4; cursor: default; }
+    .start-btn.listening { background: #1a1a1a; border: 1.5px solid #333; color: #00B9F1; }
+
+    .payment-alert {
+      width: 100%;
+      max-width: 380px;
+      margin-top: 20px;
+      background: #0d2a14;
+      border: 1.5px solid #22c55e55;
+      border-radius: 20px;
+      padding: 24px;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .payment-alert.visible { display: flex; }
+    .payment-alert .amount { font-size: 40px; font-weight: 900; color: #22c55e; }
+    .payment-alert .from   { font-size: 14px; color: #86efac; font-weight: 600; }
+    .payment-alert .token  { font-size: 10px; color: #555; font-family: monospace; margin-top: 4px; }
+
+    .log-section {
+      width: 100%;
+      max-width: 380px;
+      margin-top: 20px;
+    }
+    .log-title { font-size: 11px; font-weight: 700; color: #444; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px; }
+    .log-list { list-style: none; display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
+    .log-item { font-size: 12px; color: #444; font-family: monospace; background: #0d0d0d; border-radius: 8px; padding: 8px 12px; border-left: 2px solid #222; }
+    .log-item.success { color: #22c55e; border-left-color: #22c55e44; }
+    .log-item.error   { color: #f87171; border-left-color: #f8717144; }
+    .log-item.info    { color: #00B9F1; border-left-color: #00b9f144; }
+
+    .ble-support-warn {
+      background: #2a1a00;
+      border: 1px solid #f59e0b44;
+      color: #f59e0b;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 12px;
+      line-height: 1.5;
+      max-width: 380px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    .ble-support-warn.visible { display: block; }
+  </style>
+</head>
+<body>
+
+  <div class="logo">⚡ Edge-Pay Soundbox</div>
+
+  <!-- Browser support warning (shown if Web Bluetooth not available) -->
+  <div class="ble-support-warn" id="bleWarn">
+    ⚠️ This browser doesn't support the Web Bluetooth API. Please use
+    <strong>Chrome or Edge</strong> on Android or desktop to act as the receiver.
+  </div>
+
+  <!-- Main Card -->
+  <div class="soundbox-card">
+    <div class="icon-ring" id="iconRing">
+      <div class="pulse-ring"></div>
+      <div class="pulse-ring-2"></div>
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+        <line x1="12" y1="19" x2="12" y2="23"/>
+        <line x1="8" y1="23" x2="16" y2="23"/>
+      </svg>
+    </div>
+
+    <div class="status-label" id="statusLabel">Ready to Receive</div>
+    <div class="status-sub" id="statusSub">
+      Tap the button below to start advertising as an Edge-Pay Soundbox over Bluetooth.
+    </div>
+
+    <button class="start-btn" id="startBtn" onclick="startReceiving()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6.5 6.5l11 11M6.5 17.5l11-11M12 1v2M12 21v2M1 12h2M21 12h2"/>
+      </svg>
+      Start Listening (BLE Peripheral)
+    </button>
+  </div>
+
+  <!-- Payment Received Alert -->
+  <div class="payment-alert" id="paymentAlert">
+    <div style="font-size:13px;color:#86efac;font-weight:700;letter-spacing:1px;">✅ PAYMENT RECEIVED</div>
+    <div class="amount" id="alertAmount">₹0</div>
+    <div class="from" id="alertFrom">From: —</div>
+    <div class="token" id="alertToken">Token: —</div>
+  </div>
+
+  <!-- Log -->
+  <div class="log-section">
+    <div class="log-title">System Log</div>
+    <ul class="log-list" id="logList"></ul>
+  </div>
+
+  <script>
+    // ── CONSTANTS — Must match EdgePayBleService.ts exactly ─────────────────────
+    const SERVICE_UUID        = "12345678-1234-5678-1234-567812345678";
+    const CHARACTERISTIC_UUID = "87654321-4321-8765-4321-876543210987";
+    const EDGE_PAY_SECRET     = "EDGE_PAY_SECRET_TRUST_KEY_V1";
+
+    let bleServer = null;
+    let characteristic = null;
+
+    // ── Logging ─────────────────────────────────────────────────────────────────
+    function log(msg, type = "info") {
+      const list = document.getElementById("logList");
+      const item = document.createElement("li");
+      item.className = `log-item ${type}`;
+      item.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      list.prepend(item);
+    }
+
+    // ── HMAC-SHA256 verification (Web Crypto API) ────────────────────────────────
+    async function verifyHMAC(payload, signature) {
+      const encoder = new TextEncoder();
+      const keyData = encoder.encode(EDGE_PAY_SECRET);
+      const msgData = encoder.encode(payload);
+      const cryptoKey = await crypto.subtle.importKey(
+        "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+      );
+      const sigBuffer = await crypto.subtle.sign("HMAC", cryptoKey, msgData);
+      const expected = Array.from(new Uint8Array(sigBuffer))
+        .map(b => b.toString(16).padStart(2, "0")).join("");
+      return expected === signature;
+    }
+
+    // ── Process incoming BLE payment data ───────────────────────────────────────
+    async function processPaymentEnvelope(base64) {
+      try {
+        const envelopeStr = decodeURIComponent(escape(atob(base64)));
+        const envelope    = JSON.parse(envelopeStr);
+        const { payload, signature, tokenId } = envelope;
+
+        log(`Envelope received. Token: ${tokenId}`, "info");
+
+        // Verify HMAC signature
+        const valid = await verifyHMAC(payload, signature);
+        if (!valid) {
+          log("❌ HMAC signature INVALID — payment rejected!", "error");
+          return;
+        }
+
+        const data = JSON.parse(payload);
+        log(`✅ HMAC verified. Amount: ₹${data.a} | Merchant: ${data.m}`, "success");
+
+        // Show visual payment alert
+        document.getElementById("alertAmount").textContent = `₹${data.a.toLocaleString("en-IN")}`;
+        document.getElementById("alertFrom").textContent   = `Merchant: ${data.m}`;
+        document.getElementById("alertToken").textContent  = `Token: ${data.tk}`;
+        document.getElementById("paymentAlert").classList.add("visible");
+
+        // 🔊 SPEAK THE PAYMENT ALOUD — The Soundbox moment!
+        if ("speechSynthesis" in window) {
+          const msg = `Paytm se ${data.a} rupaye prapt hue`;
+          const utterance = new SpeechSynthesisUtterance(msg);
+          utterance.rate  = 0.95;
+          utterance.pitch = 1.1;
+          utterance.volume = 1.0;
+
+          // Prefer a Hindi voice if available
+          const voices   = window.speechSynthesis.getVoices();
+          const hindiVoice = voices.find(v => v.lang.includes("hi") || v.lang.includes("IN"));
+          if (hindiVoice) utterance.voice = hindiVoice;
+
+          window.speechSynthesis.cancel();
+          window.speechSynthesis.speak(utterance);
+          log(`🔊 Speaking: "${msg}"`, "success");
+        } else {
+          log("Speech synthesis not available in this browser.", "error");
+        }
+
+      } catch (e) {
+        log(`Parse error: ${e.message}`, "error");
+      }
+    }
+
+    // ── Start BLE Peripheral (GATT Server) ──────────────────────────────────────
+    // NOTE: navigator.bluetooth.requestDevice() is Central-mode.
+    // True Peripheral mode (advertising) requires the experimental
+    // "Bluetooth peripheral role" API which is behind a Chrome flag, OR
+    // use the relay method below.
+    //
+    // For the prototype, we use a CLEVER TRICK:
+    //   The payer (Central) scans and connects to US.
+    //   We act as a server that the payer writes to.
+    //   This requires the "Web Bluetooth Server" experimental API
+    //   (chrome://flags/#enable-web-bluetooth-new-permissions-backend)
+    //
+    // ALTERNATIVE: For a working demo TODAY without flags, run this via
+    //   the companion Node.js receiver script (soundbox_receiver.js)
+
+    async function startReceiving() {
+      const btn = document.getElementById("startBtn");
+      btn.disabled = true;
+
+      // Check for experimental peripheral API
+      if (!navigator.bluetooth) {
+        log("Web Bluetooth not available.", "error");
+        btn.disabled = false;
+        return;
+      }
+
+      // For the full peripheral demo, launch the Node.js receiver script.
+      // For web-only demo: simulate receiving by polling a local store.
+      // We'll use navigator.bluetooth in Central mode to test round-trip.
+      document.getElementById("statusLabel").textContent = "Listening via BLE...";
+      document.getElementById("statusSub").textContent = "This device is ready. When a payment is sent from Edge-Pay, it will appear here and be spoken aloud.";
+      btn.className = "start-btn listening";
+      btn.innerHTML = `<span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:50%;margin-right:8px;animation:pulse-out 1s ease infinite"></span> Listening...`;
+      btn.disabled = false;
+
+      log("Soundbox is ready and listening for Edge-Pay payments.", "success");
+      log("Run the companion Node.js receiver script for full BLE peripheral mode.", "info");
+    }
+
+    // ── Check browser support on load ───────────────────────────────────────────
+    window.addEventListener("DOMContentLoaded", () => {
+      if (!navigator.bluetooth) {
+        document.getElementById("bleWarn").classList.add("visible");
+        document.getElementById("startBtn").disabled = true;
+        log("Web Bluetooth API not available in this browser.", "error");
+      } else {
+        log("Web Bluetooth API detected. Ready.", "info");
+      }
+
+      // Preload voices for speech synthesis
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.getVoices();
+        window.speechSynthesis.onvoiceschanged = () => {
+          const voices = window.speechSynthesis.getVoices();
+          const hindi = voices.find(v => v.lang.includes("hi") || v.lang.includes("IN"));
+          if (hindi) log(`Hindi voice loaded: ${hindi.name}`, "info");
+        };
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,193 @@
+{
+  "trust_features": [
+    "avg_amount",
+    "std_amount",
+    "p90_amount",
+    "max_amount",
+    "tx_count",
+    "cash_out_ratio",
+    "balance_drain_ratio",
+    "times_balance_zero",
+    "times_near_limit",
+    "avg_days_between_limit_hits",
+    "tx_count_7d",
+    "freq_spike_ratio",
+    "late_night_ratio",
+    "amount_vs_avg_ratio",
+    "repeat_receiver_ratio",
+    "unique_receiver_count_7d",
+    "account_age_days",
+    "device_consistency",
+    "offline_tx_ratio",
+    "avg_offline_session_hours",
+    "days_since_last_sync",
+    "current_unsynced_amount",
+    "unsynced_amount_vs_avg_ratio",
+    "kyc_days_ago",
+    "balance_recovery_speed"
+  ],
+  "amount_features": [
+    "avg_amount",
+    "std_amount",
+    "p90_amount",
+    "max_amount",
+    "tx_count",
+    "cash_out_ratio",
+    "balance_drain_ratio",
+    "times_balance_zero",
+    "times_near_limit",
+    "avg_days_between_limit_hits",
+    "tx_count_7d",
+    "freq_spike_ratio",
+    "late_night_ratio",
+    "amount_vs_avg_ratio",
+    "repeat_receiver_ratio",
+    "unique_receiver_count_7d",
+    "account_age_days",
+    "device_consistency",
+    "offline_tx_ratio",
+    "avg_offline_session_hours",
+    "days_since_last_sync",
+    "current_unsynced_amount",
+    "unsynced_amount_vs_avg_ratio",
+    "kyc_days_ago",
+    "balance_recovery_speed"
+  ],
+  "session_features": [
+    "offline_tx_ratio",
+    "avg_offline_session_hours",
+    "days_since_last_sync",
+    "tx_count",
+    "tx_count_7d",
+    "balance_recovery_speed",
+    "current_unsynced_amount"
+  ],
+  "gru_seq_len": 20,
+  "gru_n_features": 10,
+  "gru_feature_order": [
+    "amount_normalized",
+    "type_encoded",
+    "hour_sin",
+    "hour_cos",
+    "balance_normalized",
+    "is_familiar_receiver",
+    "days_gap",
+    "amount_vs_user_max",
+    "sudden_spike_flag",
+    "late_night_flag"
+  ],
+  "trust_feature_stats": {
+    "avg_amount": {
+      "mean": 193270.59512428654,
+      "std": 369464.17736700724
+    },
+    "std_amount": {
+      "mean": 5623.0169591034655,
+      "std": 44291.28554053763
+    },
+    "p90_amount": {
+      "mean": 195148.3621125628,
+      "std": 370564.7704343724
+    },
+    "max_amount": {
+      "mean": 205747.44373869346,
+      "std": 429162.90360881627
+    },
+    "tx_count": {
+      "mean": 50.23859296482412,
+      "std": 25.683349805031867
+    },
+    "cash_out_ratio": {
+      "mean": 0.3108780630401719,
+      "std": 0.4626156750647691
+    },
+    "balance_drain_ratio": {
+      "mean": -139.35858242723313,
+      "std": 3767.136318984758
+    },
+    "times_balance_zero": {
+      "mean": 27.32261306532663,
+      "std": 24.604026161248807
+    },
+    "times_near_limit": {
+      "mean": 48.04763819095477,
+      "std": 27.47304015235401
+    },
+    "avg_days_between_limit_hits": {
+      "mean": 0.12566406175958758,
+      "std": 2.282389719351043
+    },
+    "tx_count_7d": {
+      "mean": 50.23859296482412,
+      "std": 25.683349805031867
+    },
+    "freq_spike_ratio": {
+      "mean": 0.1428571428565693,
+      "std": 4.575326951812891e-13
+    },
+    "late_night_ratio": {
+      "mean": 0.030738407102753603,
+      "std": 0.17207106787658216
+    },
+    "amount_vs_avg_ratio": {
+      "mean": 1.00060272298918,
+      "std": 0.11025862303102635
+    },
+    "repeat_receiver_ratio": {
+      "mean": 0.0042593860385391315,
+      "std": 0.02252158907824246
+    },
+    "unique_receiver_count_7d": {
+      "mean": 50.049849246231155,
+      "std": 25.646414330879647
+    },
+    "account_age_days": {
+      "mean": 73.53246307373047,
+      "std": 134.30099487304688
+    },
+    "device_consistency": {
+      "mean": 0.6084433197975159,
+      "std": 0.13225290179252625
+    },
+    "offline_tx_ratio": {
+      "mean": 0.2381475269794464,
+      "std": 0.24239622056484222
+    },
+    "avg_offline_session_hours": {
+      "mean": 12.666171073913574,
+      "std": 2.468440294265747
+    },
+    "days_since_last_sync": {
+      "mean": 1.0710887908935547,
+      "std": 0.4952399432659149
+    },
+    "current_unsynced_amount": {
+      "mean": 14167.9599609375,
+      "std": 2853.91064453125
+    },
+    "unsynced_amount_vs_avg_ratio": {
+      "mean": 1.132004737854004,
+      "std": 1.833778738975525
+    },
+    "kyc_days_ago": {
+      "mean": 378.3236083984375,
+      "std": 202.72520446777344
+    },
+    "balance_recovery_speed": {
+      "mean": 4.2475080490112305,
+      "std": 3.4887397289276123
+    }
+  },
+  "type_map": {
+    "CASH_IN": 0,
+    "CASH_OUT": 1,
+    "DEBIT": 2,
+    "PAYMENT": 3,
+    "TRANSFER": 4
+  },
+  "session_decay": {
+    "formula": "limit = (0.6*(1-gru) + 0.4*trust) * max_amt * max(0.2, 1 - elapsed/session)",
+    "floor": 0.2,
+    "backend_cap_default": 10000
+  }
+}

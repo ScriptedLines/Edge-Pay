@@ -1,0 +1,12 @@
+const fs = require('fs');
+const model = JSON.parse(fs.readFileSync('public/models/trustscore/trust_xgboost.json'));
+console.log("Root keys:", Object.keys(model));
+console.log("Learner keys:", Object.keys(model.learner));
+console.log("Booster keys:", Object.keys(model.learner.gradient_booster));
+console.log("Model keys:", Object.keys(model.learner.gradient_booster.model));
+console.log("Tree 0 keys:", Object.keys(model.learner.gradient_booster.model.trees[0]));
+console.log("Base score:", model.learner.learner_model_param.base_score);
+console.log("Sample left children:", model.learner.gradient_booster.model.trees[0].left_children.slice(0, 5));
+console.log("Sample split indices:", model.learner.gradient_booster.model.trees[0].split_indices.slice(0, 5));
+console.log("Sample split conditions:", model.learner.gradient_booster.model.trees[0].split_conditions.slice(0, 5));
+console.log("Sample base_weights:", model.learner.gradient_booster.model.trees[0].base_weights.slice(0, 5));

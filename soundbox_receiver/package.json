@@ -1,0 +1,14 @@
+{
+  "name": "edgepay-soundbox-receiver",
+  "version": "1.0.0",
+  "description": "Edge-Pay BLE Soundbox Receiver — speaks incoming offline payments out loud",
+  "main": "soundbox_receiver.js",
+  "scripts": {
+    "start": "node soundbox_receiver.js"
+  },
+  "dependencies": {
+    "@abandonware/bleno": "^0.6.1",
+    "node-gtts": "^2.0.3",
+    "play-sound": "^1.1.6"
+  }
+}
