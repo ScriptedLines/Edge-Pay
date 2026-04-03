@@ -19,6 +19,7 @@ export default function ReceiveOfflineQR({ upiId, bleDeviceId, onClose }: Receiv
   const [settledOnline, setSettledOnline] = useState(false);
   const [senderName, setSenderName] = useState("Sender");
   const [btStatus, setBtStatus] = useState<"enabling" | "on" | "off">("enabling");
+  const autoDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Stable BLE device ID for this session (avoid re-render noise)
   const stableBleId = useRef(bleDeviceId).current;
@@ -55,78 +56,49 @@ export default function ReceiveOfflineQR({ upiId, bleDeviceId, onClose }: Receiv
   const handleReceivedPayload = async (data: any) => {
     if (!data.amount) return;
 
-    const amount: number = data.amount;
-          const sender: string = data.sender || "Unknown Sender";
-          setSenderName(sender);
-          setReceivedAmount(amount);
+    const amount = Number(data.amount);
+    const sender = data.sender || "Unknown Sender";
+    const token = data.token ?? data.tokenId;
 
-          const txs = JSON.parse(localStorage.getItem("paytm_transactions") || "[]");
+    setSenderName(sender);
+    setReceivedAmount(amount);
+    // If the receiver is already online the settlement will happen automatically
+    // when the sender reconnects — no action needed on the receiver's side.
+    setSettledOnline(navigator.onLine);
 
-          const newTx = {
-            id: `recv-${Date.now()}`,
-            date: Date.now(),
-            title: "EdgePay Received",
-            target: sender,
-            amount,
-            type: "credit",
-            settled: false,
-          };
+    // Auto-close after 6 s so the receiver is never stuck waiting for an action.
+    if (autoDismissRef.current) clearTimeout(autoDismissRef.current);
+    autoDismissRef.current = setTimeout(() => onClose(), 6000);
 
-          // ── Merchant Proxy: if online, settle immediately via backend ──────
-          let settledNow = false;
-          if (navigator.onLine) {
-            const backendUrl = localStorage.getItem("paytm_backend_url") || "http://192.168.1.34:8000";
-            try {
-              const res = await fetch(`${backendUrl}/api/sync`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId: "edgepay_merchant", transactions: [newTx] }),
-              });
-              if (res.ok) {
-                settledNow = true;
-                newTx.settled = true;
-                setSettledOnline(true);
-                
-                // Add to actual bank balance since we are online!
-                const bal = Number(localStorage.getItem("paytm_bank_balance") || "40000");
-                localStorage.setItem("paytm_bank_balance", String(bal + amount));
+    const txs = JSON.parse(localStorage.getItem("paytm_transactions") || "[]");
 
-                // Push a settlement notification
-                const notifications = JSON.parse(localStorage.getItem("paytm_notifications") || "[]");
-                notifications.unshift({
-                  id: `n-${Date.now()}`,
-                  title: "Payment Settled!",
-                  desc: `₹${amount.toLocaleString("en-IN")} from ${sender} settled immediately via EdgePay Proxy.`,
-                  icon: "shield",
-                  ts: Date.now(),
-                });
-                localStorage.setItem("paytm_notifications", JSON.stringify(notifications.slice(0, 30)));
-                localStorage.setItem("paytm_unread", String(Number(localStorage.getItem("paytm_unread") || "0") + 1));
-              }
-            } catch {
-              // Backend unreachable — fall through to pending queue
-            }
-          }
+    const newTx = {
+      id: `recv-${Date.now()}`,
+      date: Date.now(),
+      title: "Edge Pay — Pending UPI",
+      target: sender,
+      amount,
+      type: "credit",
+      settled: false,
+      edgePending: true as const,
+      ...(token ? { token } : {}),
+    };
 
-          localStorage.setItem("paytm_transactions", JSON.stringify([newTx, ...txs]));
+    localStorage.setItem("paytm_transactions", JSON.stringify([newTx, ...txs]));
 
-          if (!settledNow) {
-            // Add to Edge Wallet (Pending Credits) since we are offline!
-            const credits = JSON.parse(localStorage.getItem("paytm_pending_credits") || "[]");
-            localStorage.setItem("paytm_pending_credits", JSON.stringify([...credits, newTx]));
+    const credits = JSON.parse(localStorage.getItem("paytm_pending_credits") || "[]");
+    localStorage.setItem("paytm_pending_credits", JSON.stringify([...credits, newTx]));
 
-            // Push a pending notification
-            const notifications = JSON.parse(localStorage.getItem("paytm_notifications") || "[]");
-            notifications.unshift({
-              id: `n-${Date.now()}`,
-              title: "EdgePay Received (Pending)",
-              desc: `₹${amount.toLocaleString("en-IN")} from ${sender} received offline. Will settle when internet is restored.`,
-              icon: "zap",
-              ts: Date.now(),
-            });
-            localStorage.setItem("paytm_notifications", JSON.stringify(notifications.slice(0, 30)));
-            localStorage.setItem("paytm_unread", String(Number(localStorage.getItem("paytm_unread") || "0") + 1));
-          }
+    const notifications = JSON.parse(localStorage.getItem("paytm_notifications") || "[]");
+    notifications.unshift({
+      id: `n-${Date.now()}`,
+      title: "Edge Pay wallet credited",
+      desc: `₹${amount.toLocaleString("en-IN")} from ${sender} is in your Edge wallet. Bank/UPI credits when the sender reconnects and settles.`,
+      icon: "zap",
+      ts: Date.now(),
+    });
+    localStorage.setItem("paytm_notifications", JSON.stringify(notifications.slice(0, 30)));
+    localStorage.setItem("paytm_unread", String(Number(localStorage.getItem("paytm_unread") || "0") + 1));
 
     const trustPoints = Number(localStorage.getItem("paytm_trust_points") || "0");
     localStorage.setItem("paytm_trust_points", String(trustPoints + 2));
@@ -214,18 +186,21 @@ export default function ReceiveOfflineQR({ upiId, bleDeviceId, onClose }: Receiv
               <>
                 <Wifi size={14} className="text-green-600" />
                 <span className="text-[12px] font-bold text-green-700 dark:text-green-400">
-                  Settled instantly via online proxy ✓
+                  Payment guaranteed — auto-settling to your bank ✓
                 </span>
               </>
             ) : (
               <>
                 <WifiOff size={14} className="text-amber-600" />
                 <span className="text-[12px] font-bold text-amber-700 dark:text-amber-400">
-                  Queued — will settle when internet restores
+                  Saved to Edge wallet — credits when sender reconnects
                 </span>
               </>
             )}
           </div>
+          {settledOnline && (
+            <p className="text-[11px] text-gray-400 mt-1 text-center">Closing automatically…</p>
+          )}
 
           <p className="text-[12px] text-gray-400 mt-3 max-w-[250px] leading-relaxed">
             Transaction signed over {Capacitor.isNativePlatform() ? "Bluetooth LE" : "Radio Mock"}.

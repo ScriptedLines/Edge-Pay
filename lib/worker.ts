@@ -15,7 +15,7 @@ const INTENTS = [
 ];
 
 let extractor: any = null;
-let intentVectors: { id: string; category: string; vector: any }[] = [];
+const intentVectors: { id: string; category: string; vector: any }[] = [];
 
 // Cosine Similarity Algorithm
 function cosineSimilarity(a: number[], b: number[]) {

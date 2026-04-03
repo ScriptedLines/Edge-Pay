@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Capacitor } from "@capacitor/core";
 import {
   Bluetooth,
   Volume2,
@@ -12,11 +13,16 @@ import {
   Zap,
 } from "lucide-react";
 import { transmitPayment, BlePhase } from "@/lib/ble/EdgePayBleService";
+import { transmitP2PPayload } from "@/lib/ble/NativeP2PService";
 
 interface BleSoundboxProps {
   amount: number;
   target: string;
   merchantId?: string;
+  // For browser simulator: receiver listens on localStorage key `ble_payload_<bleId>`
+  targetBleId?: string;
+  senderUpiId?: string;
+  tokenId?: string;
   onComplete?: (success: boolean, tokenId?: string) => void;
 }
 
@@ -38,7 +44,15 @@ const PHASE_SUBLABELS: Record<BlePhase, string> = {
   error:        "Could not reach the soundbox. Payment will sync when online.",
 };
 
-export default function BleSoundbox({ amount, target, merchantId, onComplete }: BleSoundboxProps) {
+export default function BleSoundbox({
+  amount,
+  target,
+  merchantId,
+  targetBleId,
+  senderUpiId,
+  tokenId,
+  onComplete,
+}: BleSoundboxProps) {
   const [phase, setPhase] = useState<BlePhase>("idle");
   const [detail, setDetail] = useState("");
   const [deviceName, setDeviceName] = useState<string>("");
@@ -50,6 +64,43 @@ export default function BleSoundbox({ amount, target, merchantId, onComplete }: 
   }, []);
 
   const startBleTransmission = useCallback(async () => {
+    // Browser simulator path: push payload into localStorage for receiver screen.
+    if (!Capacitor.isNativePlatform() && targetBleId && senderUpiId) {
+      const res = await transmitP2PPayload(
+        targetBleId,
+        {
+          amount,
+          sender: senderUpiId,
+          tokenId,
+          ts: Date.now(),
+        },
+        (p) => {
+          if (p === "connecting") handlePhase("connecting", "Connecting to Soundbox (simulated)...");
+          if (p === "transmitting") handlePhase("transmitting", "Transmitting Secure Bundle (simulated)...");
+          if (p === "success") handlePhase("success", "Payment Transmitted! (simulated)");
+          if (p === "error") handlePhase("error", "Transmission Failed (simulated)");
+        }
+      );
+
+      if (res.success) {
+        if (!hasTriggeredTts && "speechSynthesis" in window) {
+          setHasTriggeredTts(true);
+          const utterance = new SpeechSynthesisUtterance(
+            `Payment of ${amount} rupees to ${target} sent via Edge Pay`
+          );
+          utterance.rate = 1.0;
+          utterance.pitch = 1.0;
+          utterance.volume = 1.0;
+          window.speechSynthesis.cancel();
+          window.speechSynthesis.speak(utterance);
+        }
+        setTimeout(() => onComplete?.(true, tokenId), 700);
+      } else {
+        setTimeout(() => onComplete?.(false), 1000);
+      }
+      return;
+    }
+
     const merchant = merchantId || target;
     const result = await transmitPayment(amount, merchant, handlePhase);
 
@@ -79,7 +130,17 @@ export default function BleSoundbox({ amount, target, merchantId, onComplete }: 
         setPhase("idle");
       }
     }
-  }, [amount, target, merchantId, handlePhase, hasTriggeredTts, onComplete]);
+  }, [
+    amount,
+    target,
+    merchantId,
+    targetBleId,
+    senderUpiId,
+    tokenId,
+    handlePhase,
+    hasTriggeredTts,
+    onComplete,
+  ]);
 
   // On mount, immediately start BLE (triggers the browser device picker)
   useEffect(() => {

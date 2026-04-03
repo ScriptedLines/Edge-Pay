@@ -1,18 +1,31 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ShieldCheck, Clock, Wifi, BadgeCheck } from "lucide-react";
+import { ShieldCheck, Clock, Wifi, BadgeCheck, ScanLine } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 
 interface ReceiverReceiptSlipProps {
   amount: number;
   target: string;
   tokenId: string;
   timestamp: number;
+  senderUpiId: string;
+  /** Receiver UPI (merchant) for settlement when sender syncs */
+  receiverUpiId: string;
 }
 
-export default function ReceiverReceiptSlip({ amount, target, tokenId, timestamp }: ReceiverReceiptSlipProps) {
+export default function ReceiverReceiptSlip({ amount, target, tokenId, timestamp, senderUpiId, receiverUpiId }: ReceiverReceiptSlipProps) {
   const timeStr = new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const dateStr = new Date(timestamp).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  
+  const receiptPayload = JSON.stringify({
+    amount,
+    sender: senderUpiId,
+    token: tokenId,
+    date: timestamp,
+    receiverUpiId,
+    edgeOffline: true,
+  });
 
   return (
     <motion.div
@@ -76,6 +89,24 @@ export default function ReceiverReceiptSlip({ amount, target, tokenId, timestamp
              </p>
            </div>
         )}
+      </div>
+
+      {/* QR Code Handshake */}
+      <div className="px-5 pb-5 flex flex-col items-center border-t border-dashed border-green-600/10 dark:border-green-900/30 pt-5">
+        <p className="text-[12px] font-bold text-green-700 dark:text-green-500 uppercase tracking-widest flex items-center gap-1.5 mb-3">
+          <ScanLine size={14} /> Scan to Collect
+        </p>
+        <div className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100">
+          <QRCodeSVG 
+            value={`edgepay://collect?payload=${encodeURIComponent(receiptPayload)}`}
+            size={120} 
+            bgColor={"#ffffff"} 
+            fgColor={"#000000"} 
+            level={"M"}
+            includeMargin={false}
+          />
+        </div>
+        <p className="text-[11px] text-gray-500 mt-3 max-w-[200px] text-center">Ask the receiver to scan this to instantly verify payment offline.</p>
       </div>
 
       {/* Footer */}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import {
@@ -69,11 +69,13 @@ export default function NativePaytmClone() {
   // Avoid hydration mismatch
   useEffect(() => {
     setMounted(true);
-    // Force balance reset for user
-    if (typeof window !== 'undefined' && !localStorage.getItem('forced_40k_reset')) {
-      setBankBalance(40000);
-      localStorage.setItem('forced_40k_reset', 'true');
-      localStorage.setItem('paytm_session_start_balance', '40000');
+    // Only initialize default wallet once (avoid masking real balance updates).
+    if (typeof window !== 'undefined') {
+      const existing = localStorage.getItem('paytm_bank_balance');
+      if (existing === null) {
+        setBankBalance(40000);
+        localStorage.setItem('paytm_session_start_balance', '40000');
+      }
     }
   }, []);
 
@@ -132,7 +134,7 @@ export default function NativePaytmClone() {
     if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
       url = 'http://' + url;
     }
-    return url;
+    return url.replace(/\/+$/, '');
   }, [backendUrl]);
 
   // === Ledger & Bank States (localStorage-backed) ===
@@ -188,6 +190,10 @@ export default function NativePaytmClone() {
     if (typeof window === 'undefined') return [];
     try { return JSON.parse(localStorage.getItem('paytm_pending_credits') || '[]'); } catch { return []; }
   });
+  // When paying offline via QR, we must capture the receiver's BLE broadcast id
+  // so sender can deliver payload to the correct receiver screen.
+  const [offlineTargetBleId, setOfflineTargetBleId] = useState<string | null>(null);
+  const lastOfflineBatchIdsRef = useRef<string[]>([]);
   // Guarantor Block States
   const [negativeBalance, setNegativeBalance] = useState<number>(() => {
     if (typeof window === 'undefined') return 0;
@@ -326,6 +332,7 @@ export default function NativePaytmClone() {
           const tx = data.transactions[0];
           const amount = tx.amount;
           const sender = tx.sender || "Merchant";
+          const pollToken = tx.token as string | undefined;
           
           // 1. Update Balance and Ledger
           setBankBalance(prev => {
@@ -336,68 +343,120 @@ export default function NativePaytmClone() {
           const newTx = {
             id: tx.id || `rx-${Date.now()}`,
             date: tx.date || Date.now(),
-            title: "Payment Received",
+            title: "UPI Settlement (Edge-Pay)",
             target: sender,
             amount: amount,
             type: "credit",
             settled: true,
           };
           setTransactions(prev => {
-            const updated = [newTx, ...prev];
+            // Remove the matching pending credit from history to avoid double entries
+            let filtered = prev;
+            if (pollToken) {
+              filtered = prev.filter(t => !(t.edgePending && t.token === pollToken));
+            } else {
+              const idx = prev.findIndex(t => t.edgePending && t.target === sender && Number(t.amount) === Number(amount));
+              if (idx >= 0) filtered = [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+            }
+            const updated = [newTx, ...filtered];
             localStorage.setItem("paytm_transactions", JSON.stringify(updated));
             return updated;
           });
+          setPendingOfflineCredits(prev => {
+            let next = prev;
+            if (pollToken) {
+              next = prev.filter((c: any) => !(c.edgePending && c.token === pollToken));
+            } else {
+              const idx = prev.findIndex(
+                (c: any) => c.edgePending && c.target === sender && Number(c.amount) === Number(amount)
+              );
+              if (idx >= 0) next = [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+            }
+            localStorage.setItem("paytm_pending_credits", JSON.stringify(next)); // <-- PERSIST TO LOCALSTORAGE
+            return next;
+          });
           addInteractionTrust(2);
           
-          // 2. Trigger Push Notification with sound/haptics effect
+          // 2. Trigger Push Notification
           pushNotification(
-            "Online Payment Received!",
-            `₹${amount.toLocaleString("en-IN")} received instantly from ${sender}.`,
+            "UPI settlement complete",
+            `₹${amount.toLocaleString("en-IN")} credited to your bank from ${sender}. Edge wallet reconciled.`,
             "shield"
           );
           
-          // 3. Notify any open components (like ReceiveOfflineQR)
+          // 3. Notify any open components
           localStorage.setItem("last_received_poll", JSON.stringify({ amount, sender, ts: Date.now() }));
           window.dispatchEvent(new Event("edgepay_refresh"));
         }
 
+        // --- LOCAL QUEUE SETTLEMENT (Fallback) ---
         const queueKey = `incoming_payment_${myUpiId}`;
         const queued = JSON.parse(localStorage.getItem(queueKey) || "[]");
         if (queued.length > 0) {
           const tx = queued[0];
           const amount = Number(tx.amount || 0);
           const sender = tx.sender || "Merchant";
+          const localToken = tx.token as string | undefined;
           const newTx = {
             id: tx.id || `rx-local-${Date.now()}`,
             date: tx.date || Date.now(),
-            title: "Payment Received",
+            title: "UPI Settlement (Edge-Pay)",
             target: sender,
             amount,
             type: "credit",
             settled: true,
           };
+          // 1. Credit bank balance
           setBankBalance(prev => {
             const next = prev + amount;
             localStorage.setItem("paytm_bank_balance", String(next));
             return next;
           });
           setTransactions(prev => {
-            const updated = [newTx, ...prev];
+            let filtered = prev;
+            if (localToken) {
+              filtered = prev.filter(t => !(t.edgePending && t.token === localToken));
+            } else {
+              const idx = prev.findIndex(t => t.edgePending && t.target === sender && Number(t.amount) === Number(amount));
+              if (idx >= 0) filtered = [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+            }
+            const updated = [newTx, ...filtered];
             localStorage.setItem("paytm_transactions", JSON.stringify(updated));
             return updated;
           });
+          // 2. Clear matching Edge-wallet credit
+          setPendingOfflineCredits(prev => {
+            let next = prev;
+            if (localToken) {
+              next = prev.filter((c: any) => !(c.edgePending && c.token === localToken));
+            } else {
+              const idx = prev.findIndex(
+                (c: any) => c.edgePending && c.target === sender && Number(c.amount) === Number(amount)
+              );
+              if (idx >= 0) next = [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+            }
+            localStorage.setItem("paytm_pending_credits", JSON.stringify(next));
+            return next;
+          });
           addInteractionTrust(2);
           pushNotification(
-            "Payment Received",
-            `₹${amount.toLocaleString("en-IN")} received from ${sender}.`,
+            "UPI Settlement Complete",
+            `₹${amount.toLocaleString("en-IN")} credited to your bank from ${sender}. Edge wallet reconciled.`,
             "shield"
           );
           localStorage.setItem(queueKey, JSON.stringify(queued.slice(1)));
           localStorage.setItem("last_received_poll", JSON.stringify({ amount, sender, ts: Date.now() }));
           window.dispatchEvent(new Event("edgepay_refresh"));
         }
-      } catch (err) {
-        // silently fail polling
+      } catch (err: any) {
+        // Log to console so user can see it in remote debugging
+        console.warn("Background UPI poll failed:", err.message);
+        
+        // Optional: show a small toast or notification if we want them to know the IP is wrong
+        // but we don't want to spam it every 3 seconds if they are truly offline from the backend.
+        if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+           console.error("Critical Network Error: Cannot reach FastAPI server at", normalizedBackendUrl);
+        }
       }
     };
 
@@ -416,7 +475,7 @@ export default function NativePaytmClone() {
     const day = 24 * hr;
 
     let bal = 0;
-    let txs: any[] = [];
+    const txs: any[] = [];
     let startBalStr = "40000";
 
     switch (type) {
@@ -459,14 +518,23 @@ export default function NativePaytmClone() {
   useEffect(() => { localStorage.setItem('paytm_transactions', JSON.stringify(transactions)); }, [transactions]);
   useEffect(() => { localStorage.setItem('paytm_neg_balance', String(negativeBalance)); }, [negativeBalance]);
   useEffect(() => { localStorage.setItem('paytm_pending_offline', JSON.stringify(pendingOfflineTransactions)); }, [pendingOfflineTransactions]);
+  useEffect(() => { localStorage.setItem('paytm_pending_credits', JSON.stringify(pendingOfflineCredits)); }, [pendingOfflineCredits]);
   useEffect(() => { localStorage.setItem('paytm_trust_points', String(trustPoints)); }, [trustPoints]);
 
   // Auto-Sync Modal trigger
+  // Only show for the SENDER side (pending outgoing debits).
+  // Receivers have edgePending credits which settle automatically when the sender syncs —
+  // they should never see a swipe modal.
   useEffect(() => {
-    if (isOnline && pendingOfflineTransactions.length > 0 && !showSyncModal) {
+    if (
+      isOnline &&
+      pendingOfflineTransactions.length > 0 &&
+      !showSyncModal &&
+      !isSyncing   // ← prevents re-opening while sync is in-flight
+    ) {
       setShowSyncModal(true);
     }
-  }, [isOnline, pendingOfflineTransactions.length]);
+  }, [isOnline, pendingOfflineTransactions.length, showSyncModal, isSyncing]);
 
   // Edge-Pay Limit Accounting
   const pendingDues = pendingOfflineTransactions.reduce((sum, t) => sum + t.amount, 0);
@@ -498,7 +566,7 @@ export default function NativePaytmClone() {
       const parts = text.split(/pay|to|scan|send|transfer/i);
       // Logic: skip segments that appear in noiseWords or are just prompt noise
       for (const part of parts) {
-        let cleaned = part.replace(/\d+/g, "").replace(upiId || "", "").trim();
+        const cleaned = part.replace(/\d+/g, "").replace(upiId || "", "").trim();
         // More robust noise check: segment is only a name if it doesn't just contain noise words
         const isNoise = cleaned.toLowerCase().split(/\s+/).every(word => noiseWords.includes(word));
         if (cleaned && cleaned.length > 1 && !isNoise) {
@@ -561,7 +629,7 @@ export default function NativePaytmClone() {
       }
 
       const { intentId, category, params, text } = result;
-      let data: ParseResponse = { category: category as any, actions: [] };
+      const data: ParseResponse = { category: category as any, actions: [] };
 
       // Map ML intent to schema
       if (category === "financial") {
@@ -669,7 +737,21 @@ export default function NativePaytmClone() {
     setPaymentStatus("processing");
     if (!isOnline && actionPlan) {
       setTimeout(() => {
-        setPendingOfflineTransactions((prev) => [...prev, ...actionPlan.actions]);
+        // Generate token UP FRONT so it can be embedded in the pending transaction records
+        const token = `EP-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 10000)}`;
+        const ts = Date.now();
+
+        lastOfflineBatchIdsRef.current = actionPlan.actions.map((a) => a.id);
+        // Embed payToken + upiId directly on each pending record so the settlement
+        // loop can call /api/pay with the correct receiver and token without any
+        // separate ref lookup.
+        const enrichedActions = actionPlan.actions.map((a) => ({
+          ...a,
+          payToken: token,
+          // upiId may already be set from QR scan; keep it so settlement loop finds it
+          upiId: a.upiId || undefined,
+        }));
+        setPendingOfflineTransactions((prev) => [...prev, ...enrichedActions]);
 
         const totalDed = actionPlan.actions.reduce((s, a) => s + a.amount, 0);
         // Do NOT deduct from actual bank balance offline, Edge Wallet handles it
@@ -679,9 +761,6 @@ export default function NativePaytmClone() {
         setTransactions(prev => [...newTxs, ...prev]);
         addInteractionTrust(1);
 
-        // Generate preliminary token — BLE component will update with the real HMAC-signed tokenId
-        const token = `EP-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 10000)}`;
-        const ts = Date.now();
         setLastTxMeta({ amount: totalDed, target: actionPlan.actions[0]?.target || 'Merchant', tokenId: token, ts });
         setShowSoundbox(true);
         setPaymentStatus('success');
@@ -692,12 +771,6 @@ export default function NativePaytmClone() {
           'zap'
         );
 
-        // After soundbox completes (4.5s), show receipt
-        setTimeout(() => {
-          setShowSoundbox(false);
-          setShowReceipt(true);
-        }, 5000);
-
         // Auto-close receipt after 12s total
         setTimeout(() => {
           setSheetMode(null);
@@ -705,9 +778,13 @@ export default function NativePaytmClone() {
           setActionPlan(null);
           setShowReceipt(false);
           setPaymentStatus("idle");
+          setOfflineTargetBleId(null);
         }, 12000);
       }, 500);
     } else {
+      // If user scanned for offline BLE but came online before confirming,
+      // don't keep the BLE target around.
+      setOfflineTargetBleId(null);
       setTimeout(async () => {
         setPaymentStatus("success");
         try { Haptics.impact({ style: ImpactStyle.Medium }); } catch (e) { }
@@ -897,7 +974,14 @@ export default function NativePaytmClone() {
                 </div>
                 <div>
                   <p className="text-[18px] font-extrabold text-white">You&apos;re back online!</p>
-                  <p className="text-[13px] text-gray-400">{pendingOfflineTransactions.length} pending Edge-Pay transaction{pendingOfflineTransactions.length > 1 ? 's' : ''} found</p>
+                  <p className="text-[13px] text-gray-400">
+                    {pendingOfflineTransactions.length > 0
+                      ? `${pendingOfflineTransactions.length} pending debit${pendingOfflineTransactions.length > 1 ? "s" : ""} to settle`
+                      : "No pending debits"}
+                    {pendingOfflineCredits.filter((c: any) => c.edgePending === true).length > 0
+                      ? ` · ${pendingOfflineCredits.filter((c: any) => c.edgePending === true).length} Edge wallet credit(s) await UPI from sender`
+                      : ""}
+                  </p>
                 </div>
               </div>
 
@@ -917,16 +1001,21 @@ export default function NativePaytmClone() {
                 <p className="text-[13px] text-gray-400 font-medium">Edge Wallet Settlement</p>
                 <div className="text-right">
                   <p className="text-[14px] font-bold text-red-500">-₹{pendingOfflineTransactions.reduce((s: number, t: any) => s + (t.amount || 0), 0).toLocaleString('en-IN')}</p>
-                  <p className="text-[14px] font-bold text-green-500">+₹{pendingOfflineCredits.reduce((s: number, t: any) => s + (t.amount || 0), 0).toLocaleString('en-IN')}</p>
+                  <p className="text-[14px] font-bold text-green-500">+₹{pendingOfflineCredits.filter((t: any) => t.edgePending === false).reduce((s: number, t: any) => s + (t.amount || 0), 0).toLocaleString('en-IN')}</p>
+                  {pendingOfflineCredits.some((t: any) => t.edgePending === true) && (
+                    <p className="text-[11px] text-amber-400 mt-1">Edge wallet (not bank yet): ₹{pendingOfflineCredits.filter((t: any) => t.edgePending === true).reduce((s: number, t: any) => s + (t.amount || 0), 0).toLocaleString('en-IN')}</p>
+                  )}
                 </div>
               </div>
 
               <SwipeToConfirm
                 label="Swipe to Confirm Settlement"
                 onConfirm={async () => {
-                  setShowSyncModal(false);
+                  // Set isSyncing FIRST — this gates the auto-trigger useEffect so the
+                  // modal does not re-open before pendingOfflineTransactions clears.
                   setIsSyncing(true);
                   setSyncMessage("Settling Edge-Pay dues and credits with bank...");
+                  setShowSyncModal(false);
 
                   try {
                     // Normalize transactions to match Pydantic model (OfflineTransaction)
@@ -954,9 +1043,48 @@ export default function NativePaytmClone() {
                     const data = await response.json();
 
                     const duesSum = pendingOfflineTransactions.reduce((s: number, t: any) => s + (t.amount || 0), 0);
-                    const creditsSum = pendingOfflineCredits.reduce((s: number, t: any) => s + (t.amount || 0), 0);
+                    const creditsSum = pendingOfflineCredits
+                      .filter((t: any) => t.edgePending === false)
+                      .reduce((s: number, t: any) => s + (t.amount || 0), 0);
 
                     if (data.status === "success" || data.status === "partial_success") {
+                      for (const t of pendingOfflineTransactions) {
+                        // upiId is set when payment was made; receiverUpiId is the BLE-scan path field
+                        const target = (t as any).upiId || (t as any).receiverUpiId;
+                        const amt = Number((t as any).amount || 0);
+                        if (!target || amt <= 0) {
+                          console.log("Skipping settlement for tx missing target/amount:", t);
+                          continue;
+                        }
+                        const token = (t as any).payToken || (t as any).tokenId || (t as any).id;
+                        
+                        // Local browser simulation queue (for same-browser testing fallback)
+                        try {
+                          const localQueueStr = localStorage.getItem(`incoming_payment_${target}`) || '[]';
+                          const localQueue = JSON.parse(localQueueStr);
+                          localQueue.push({ amount: amt, sender: myUpiId, token: token || null, timestamp: Date.now() });
+                          localStorage.setItem(`incoming_payment_${target}`, JSON.stringify(localQueue));
+                        } catch (e) {
+                          console.warn("Failed to write to local incoming_payment queue", e);
+                        }
+
+                        try {
+                          await fetch(`${normalizedBackendUrl}/api/pay`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              sender: myUpiId,
+                              target,
+                              amount: amt,
+                              // Always pass a token so the receiver can match their Edge wallet credit
+                              token: token || null,
+                            }),
+                          });
+                        } catch {
+                          /* receiver may pick up on retry / next sync */
+                        }
+                      }
+
                       if (data.failedTransactions && data.failedTransactions.length > 0) {
                         const failedDues = pendingOfflineTransactions.filter((t: any) => data.failedTransactions.includes(t.id)).reduce((sum: number, t: any) => sum + t.amount, 0);
                         
@@ -977,15 +1105,23 @@ export default function NativePaytmClone() {
                         setTrustPoints(prev => prev + 10);
                         pushNotification(
                           'Settlement Complete',
-                          `All pending Edge-Pay transactions settled. +10 Trust Points!`,
+                          `Pending debits settled; receivers notified for UPI credit. +10 Trust Points!`,
                           'shield'
                         );
                       }
 
-                      setTransactions((prev: any[]) => prev.map((tx: any) => tx.settled === false ? { ...tx, settled: true, title: 'Edge-Pay Settled ✓' } : tx));
+                      setTransactions((prev: any[]) =>
+                        prev.map((tx: any) =>
+                          tx.settled === false && tx.type === "debit" && tx.title === "Edge-Pay Offline"
+                            ? { ...tx, settled: true, title: "Edge-Pay Settled ✓" }
+                            : tx
+                        )
+                      );
                       setPendingOfflineTransactions([]);
-                      setPendingOfflineCredits([]);
-                      localStorage.setItem('paytm_pending_credits', '[]');
+                      setPendingOfflineCredits((prev) => {
+                        const kept = prev.filter((c: any) => c.edgePending === true);
+                        return kept;
+                      });
                       localStorage.setItem('paytm_pending_offline', '[]');
                     }
                   } catch (e) {
@@ -1231,6 +1367,7 @@ export default function NativePaytmClone() {
           setCustomRepayAmount("");
           setRepayMode("full");
           setActiveQuickAction(null);
+          setOfflineTargetBleId(null);
         }}
         title={
           sheetMode === "repay" ? "Clear Pending Dues" :
@@ -1664,12 +1801,24 @@ export default function NativePaytmClone() {
                 amount={total}
                 target={actionPlan?.actions[0]?.target || "Merchant"}
                 merchantId={actionPlan?.actions[0]?.upiId || actionPlan?.actions[0]?.target || "merchant"}
+                    targetBleId={offlineTargetBleId ?? undefined}
+                    senderUpiId={myUpiId}
+                    tokenId={lastTxMeta?.tokenId}
                 onComplete={(success, tokenId) => {
                   if (tokenId) {
                     setLastTxMeta(prev => prev ? { ...prev, tokenId } : prev);
+                    const ids = lastOfflineBatchIdsRef.current;
+                    if (ids.length > 0) {
+                      setPendingOfflineTransactions((prev) =>
+                        prev.map((row: any) =>
+                          ids.includes(row.id) && !row.payToken ? { ...row, payToken: tokenId } : row
+                        )
+                      );
+                    }
                   }
                   setShowSoundbox(false);
                   setShowReceipt(true);
+                      setOfflineTargetBleId(null);
                 }}
               />
             </div>
@@ -1681,8 +1830,17 @@ export default function NativePaytmClone() {
                 tokenId={lastTxMeta.tokenId}
                 timestamp={lastTxMeta.ts}
                 senderUpiId={myUpiId}
+                receiverUpiId={actionPlan?.actions[0]?.upiId || ""}
               />
-              <button onClick={() => { setSheetMode(null); setShowReceipt(false); setPaymentStatus("idle"); }} className="w-full mt-6 py-4 bg-gray-100 dark:bg-[#1A1A1A] border border-gray-200 dark:border-gray-800 rounded-[20px] font-bold text-[#00B9F1] active:scale-95 transition-all text-[15px]">
+              <button
+                onClick={() => {
+                  setSheetMode(null);
+                  setShowReceipt(false);
+                  setPaymentStatus("idle");
+                  setOfflineTargetBleId(null);
+                }}
+                className="w-full mt-6 py-4 bg-gray-100 dark:bg-[#1A1A1A] border border-gray-200 dark:border-gray-800 rounded-[20px] font-bold text-[#00B9F1] active:scale-95 transition-all text-[15px]"
+              >
                 Done
               </button>
             </div>
@@ -1736,7 +1894,7 @@ export default function NativePaytmClone() {
         {sheetMode === "receiveQR" && (
           <ReceiveOfflineQR
             upiId={myUpiId}
-            bleDeviceId={`EDGE-${Math.floor(1000 + Math.random() * 8999)}`}
+            bleDeviceId={myUpiId.replace(/[^A-Za-z0-9]/g, "").substring(0, 8).toUpperCase() || "EDGE-RCV"}
             onClose={() => setSheetMode(null)}
           />
         )}
@@ -1748,6 +1906,8 @@ export default function NativePaytmClone() {
               setTimeout(() => {
                 const isOfflineEdgePay = !isOnline && ble;
                 const title = isOfflineEdgePay ? "Edge-Pay Offline" : "Pay via QR";
+
+                setOfflineTargetBleId(isOfflineEdgePay ? (ble || null) : null);
                 
                 setActiveQuickAction({
                   id: "scan",
@@ -1766,7 +1926,10 @@ export default function NativePaytmClone() {
                 setSheetMode("quickAction");
               }, 200);
             }}
-            onCancel={() => setSheetMode(null)}
+            onCancel={() => {
+              setOfflineTargetBleId(null);
+              setSheetMode(null);
+            }}
           />
         )}
       </BottomSheetContainer>

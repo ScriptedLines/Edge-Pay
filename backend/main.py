@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+from pathlib import Path
 import uuid
 from typing import Literal, Optional
 
@@ -20,13 +22,10 @@ from pydantic import BaseModel, Field
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-if not GEMINI_API_KEY or GEMINI_API_KEY == "your_key_here":
-    raise RuntimeError(
-        "GEMINI_API_KEY is not set. "
-        "Add it to backend/.env before starting the server."
-    )
-
-genai.configure(api_key=GEMINI_API_KEY)
+# Don't hard-crash server if GEMINI key is missing.
+# We still want payment endpoints (/api/pay,/api/poll,/api/sync) to work.
+if GEMINI_API_KEY and GEMINI_API_KEY != "your_key_here":
+    genai.configure(api_key=GEMINI_API_KEY)
 
 # ── Pydantic Models ────────────────────────────────────────────────────────────
 
@@ -61,6 +60,53 @@ class IntentResponse(BaseModel):
 
 class ParseRequest(BaseModel):
     intent: str
+
+
+# ── Payment & Sync Models (used by the frontend) ─────────────────────────────
+class PayRequest(BaseModel):
+    sender: str
+    target: str
+    amount: int
+    token: Optional[str] = None
+
+
+class OfflineTx(BaseModel):
+    id: str
+    target: str
+    amount: int
+    type: Literal["debit", "credit", "repay", "repayment", "repay_edge", "repayments"]
+    date: int
+    title: Optional[str] = None
+    settled: Optional[bool] = None
+
+
+class SyncRequest(BaseModel):
+    userId: str
+    transactions: list[OfflineTx]
+
+
+# ── Minimal in-memory store (with optional JSON persistence) ────────────────
+STORE_LOCK = threading.Lock()
+STORE_PATH = Path(__file__).with_name("edgepay_store.json")
+
+def _load_store() -> dict:
+    try:
+        if STORE_PATH.exists():
+            return json.loads(STORE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {"pending_by_upi": {}}
+
+
+STORE: dict = _load_store()
+
+
+def _persist_store() -> None:
+    try:
+        STORE_PATH.write_text(json.dumps(STORE, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        # Persistence is best-effort; payment simulation still works in-memory.
+        pass
 
 
 # ── FastAPI App ────────────────────────────────────────────────────────────────
@@ -165,6 +211,12 @@ async def parse_intent(request: ParseRequest) -> IntentResponse:
     if not request.intent.strip():
         raise HTTPException(status_code=422, detail="Intent text cannot be empty.")
 
+    if not GEMINI_API_KEY or GEMINI_API_KEY == "your_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="GEMINI_API_KEY is missing on this backend. Payment endpoints still work; /api/parse requires the key.",
+        )
+
     try:
         response = gemini_model.generate_content(
             request.intent,
@@ -204,3 +256,63 @@ async def root():
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "model": "gemini-2.0-flash", "version": "2.0"}
+
+
+# ── Payment endpoints expected by the frontend ──────────────────────────────
+@app.post("/api/pay")
+async def api_pay(body: PayRequest) -> dict:
+    amount = int(body.amount)
+    if amount <= 0:
+        raise HTTPException(status_code=422, detail="amount must be positive")
+    if not body.sender or not body.target:
+        raise HTTPException(status_code=422, detail="sender and target are required")
+
+    tx = {
+        "id": str(uuid.uuid4()),
+        "sender": body.sender,
+        "target": body.target,
+        "amount": amount,
+    }
+    if body.token:
+        tx["token"] = body.token
+
+    # Use wall-clock timestamp (avoid placeholder randomness).
+    import time
+    tx["date"] = int(time.time() * 1000)
+
+    with STORE_LOCK:
+        pending_by_upi = STORE.setdefault("pending_by_upi", {})
+        queue = pending_by_upi.setdefault(body.target, [])
+        queue.append(tx)
+        _persist_store()
+
+    return {"status": "queued", "id": tx["id"]}
+
+
+@app.get("/api/poll/{upi_id}")
+async def api_poll(upi_id: str) -> dict:
+    if not upi_id:
+        raise HTTPException(status_code=422, detail="upi_id is required")
+
+    with STORE_LOCK:
+        pending_by_upi = STORE.setdefault("pending_by_upi", {})
+        queue = pending_by_upi.get(upi_id, [])
+        if not queue:
+            return {"hasNew": False, "transactions": []}
+
+        tx = queue.pop(0)
+        pending_by_upi[upi_id] = queue
+        _persist_store()
+
+    return {"hasNew": True, "transactions": [tx]}
+
+
+@app.post("/api/sync")
+async def api_sync(body: SyncRequest) -> dict:
+    # For the demo app, we accept any offline transactions and report success.
+    # The frontend performs local ledger updates after calling this endpoint.
+    if not body.userId:
+        raise HTTPException(status_code=422, detail="userId is required")
+
+    settled_count = len(body.transactions)
+    return {"status": "success", "settled_count": settled_count, "failedTransactions": []}

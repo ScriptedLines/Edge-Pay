@@ -42,6 +42,25 @@ body {
   100% { transform: translateX(-50%); }
 }
 
+/* ── Capacitor Barcode Scanner ── makes the webview transparent so the camera shows through */
+body.barcode-scanner-active {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+body.barcode-scanner-active * {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: transparent !important;
+  border-color: transparent !important;
+}
+/* Keep the scanner UI overlay visible */
+body.barcode-scanner-active .barcode-scanner-overlay,
+body.barcode-scanner-active .barcode-scanner-overlay * {
+  background: transparent !important;
+  color: white !important;
+  border-color: rgba(0,185,241,1) !important;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 4px;
