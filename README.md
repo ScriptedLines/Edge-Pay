@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# EdgePay: Frontend and Mobile Application
 
-## Getting Started
+The EdgePay frontend is a high-performance, mobile-first application developed using Next.js 15+ and Capacitor. It provides a unified experience across web and native Android platforms.
 
-First, run the development server:
+---
 
+## Core Frontend Functionality
+
+- **Connectivity Management**: Real-time detection of network status for automatic switching between offline BLE and online FastAPI modes.
+- **On-Device Risk Engine**: TensorFlow Lite integration for GRU and XGBoost model inference on the mobile device.
+- **Refined User Experience**: Professional interface elements using Framer Motion animations and Lucide React iconography.
+- **Synchronization Logic**: Manages local SQLite storage for offline transactions and synchronizes with the settlement server upon network recovery.
+
+---
+
+## Technical Stack
+
+- **Framework**: Next.js 15+ (React 19)
+- **Mobile Foundation**: Capacitor
+- **Styling**: Tailwind CSS 4.0
+- **Native APIs**:
+  - `@capacitor-community/bluetooth-le` (Offline P2P protocol)
+  - `@capacitor/barcode-scanner` (QR Payments)
+  - `@capacitor/haptics` (Tactile feedback)
+
+---
+
+## Development and Deployment Commands
+
+### Development Server
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Build and Synchronization (Android)
+```bash
+# Build the production application
+npm run build
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+# Synchronize assets with the native Android project
+npx cap sync android
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# Open project in Android Studio
+npx cap open android
+```
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## Directory Architecture
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `/app`: Next.js App Router (Logic and UI)
+- `/components/ui`: Reusable, enterprise-grade UI components
+- `/lib`: Core utilities including BLE communication, ML inference, and API clients
+- `/android`: Native Android source code and Gradle build configurations
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**Author**: Aaryaman Bisht
